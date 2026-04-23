@@ -24,7 +24,6 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
 
@@ -52,7 +51,6 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
       source.connect(analyser);
-      analyserRef.current = analyser;
 
       function drawBars() {
         const data = new Uint8Array(analyser.frequencyBinCount);
