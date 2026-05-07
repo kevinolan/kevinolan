@@ -46,7 +46,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Set up audio visualiser
+      // Set up audio visualizer
       const ctx = new AudioContext();
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
@@ -84,7 +84,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           label: `Recording ${new Date().toLocaleTimeString()}`,
           date: new Date().toISOString(),
         };
-        setRecordings(prev => [entry, ...prev]);
+        setRecordings((prev: RecordingEntry[]) => [entry, ...prev]);
 
         const dur = Math.round((Date.now() - startTimeRef.current) / 1000);
         onSessionComplete({
@@ -101,7 +101,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       setIsRecording(true);
       setElapsed(0);
 
-      timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
+      timerRef.current = setInterval(() => setElapsed((s: number) => s + 1), 1000);
     } catch {
       alert('Microphone access denied. Please allow microphone access in your browser settings.');
     }
@@ -115,10 +115,10 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   }
 
   function deleteRecording(id: string) {
-    setRecordings(prev => {
-      const entry = prev.find(r => r.id === id);
+    setRecordings((prev: RecordingEntry[]) => {
+      const entry = prev.find((r: RecordingEntry) => r.id === id);
       if (entry) URL.revokeObjectURL(entry.url);
-      return prev.filter(r => r.id !== id);
+      return prev.filter((r: RecordingEntry) => r.id !== id);
     });
   }
 
@@ -145,7 +145,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         ) : (
           <div className="recorder-section">
             <div className="recorder-visualizer" aria-hidden>
-              {bars.map((h, i) => (
+              {bars.map((h: number, i: number) => (
                 <div
                   key={i}
                   className="viz-bar"
@@ -183,7 +183,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         <div className="card">
           <div className="card-title">🎧 Your Recordings</div>
           <div className="recordings-list">
-            {recordings.map(r => (
+            {recordings.map((r: RecordingEntry) => (
               <div className="recording-entry" key={r.id}>
                 <span className="recording-label">{r.label}</span>
                 <audio controls src={r.url} />
