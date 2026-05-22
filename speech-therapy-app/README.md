@@ -71,3 +71,26 @@ export default defineConfig([
   },
 ])
 ```
+
+## Deployment (GitHub Pages)
+
+This repository includes a GitHub Actions workflow that builds the app and deploys the `dist/` output to GitHub Pages whenever `main` is pushed.
+
+To enable deployment:
+
+1. Commit and push your changes to the `main` branch.
+
+```bash
+git add .
+git commit -m "Add GH Pages workflow"
+git push origin main
+```
+
+2. The workflow `.github/workflows/gh-pages.yml` will run automatically and publish the site.
+
+3. After the first successful run, GitHub Pages will host the site. You can view the workflow logs in the Actions tab if anything fails.
+
+Notes:
+- If you want the site to be hosted at a repository subpath (https://<user>.github.io/<repo>/), you may need to set `base` in `vite.config.ts` to `'/<repo>/'` before building.
+- The workflow uses the official `actions/deploy-pages` action which configures Pages automatically when it has `pages: write` permission.
+
