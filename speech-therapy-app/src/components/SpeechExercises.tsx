@@ -184,7 +184,7 @@ export default function SpeechExercises({ onSessionComplete }: Props) {
       <h2 className="section-heading">🗣️ Speech Exercises</h2>
       <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem', fontSize: '0.9rem' }}>
         Evidence-based fluency and stuttering-modification techniques used by speech-language pathologists.
-        Tap an exercise to begin.
+        Start with the easiest exercise, repeat it until it feels natural, then move up gradually.
       </p>
 
       <div className="exercise-list">

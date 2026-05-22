@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { useSessions, type Tab } from './hooks/useSessions';
 import Dashboard from './components/Dashboard';
@@ -25,7 +25,29 @@ const NAV: NavItem[] = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [nextStepNotice, setNextStepNotice] = useState<string | null>(null);
   const { sessions, addSession, clearSessions } = useSessions();
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  function handleSessionComplete(session: Parameters<typeof addSession>[0]) {
+    addSession(session);
+    const nextTab = getNextTab(session.type);
+    setNextStepNotice(getNextStepNotice(session.type, nextTab));
+    setActiveTab(nextTab);
+
+    if (noticeTimerRef.current) {
+      clearTimeout(noticeTimerRef.current);
+    }
+    noticeTimerRef.current = setTimeout(() => setNextStepNotice(null), 3000);
+  }
 
   return (
     <>
@@ -52,30 +74,70 @@ export default function App() {
       </header>
 
       <main className="app-main">
+        {nextStepNotice && (
+          <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--primary)' }}>
+            <div className="card-title">✅ Next up</div>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>{nextStepNotice}</p>
+          </div>
+        )}
         {activeTab === 'home' && (
           <Dashboard sessions={sessions} onNavigate={setActiveTab} />
         )}
         {activeTab === 'breathing' && (
-          <BreathingExercise onSessionComplete={addSession} />
+          <BreathingExercise onSessionComplete={handleSessionComplete} />
         )}
         {activeTab === 'exercises' && (
-          <SpeechExercises onSessionComplete={addSession} />
+          <SpeechExercises onSessionComplete={handleSessionComplete} />
         )}
         {activeTab === 'recorder' && (
-          <VoiceRecorder onSessionComplete={addSession} />
+          <VoiceRecorder onSessionComplete={handleSessionComplete} />
         )}
         {activeTab === 'progress' && (
           <ProgressTracker sessions={sessions} onClear={clearSessions} />
         )}
         {activeTab === 'tips' && (
-          <TipsPanel onSessionComplete={addSession} />
+          <TipsPanel onSessionComplete={handleSessionComplete} />
         )}
       </main>
 
       <footer className="app-footer">
-        FluentPath — Speech Therapy App for People Who Stutter &nbsp;·&nbsp;
+        FluentPath — gradual stuttering support &nbsp;·&nbsp;
         <span style={{ fontSize: '0.8em' }}>Always work with a qualified speech-language pathologist for clinical guidance.</span>
       </footer>
     </>
   );
+}
+
+function getNextTab(type: Tab): Tab {
+  switch (type) {
+    case 'breathing':
+      return 'exercises';
+    case 'exercises':
+      return 'recorder';
+    case 'recorder':
+      return 'tips';
+    case 'tips':
+      return 'home';
+    case 'home':
+    case 'progress':
+    default:
+      return 'home';
+  }
+}
+
+function getNextStepNotice(type: Tab, nextTab: Tab): string {
+  const labels: Record<Tab, string> = {
+    home: 'Home',
+    breathing: 'Breathing',
+    exercises: 'Speech Practice',
+    recorder: 'Record & Listen',
+    progress: 'Progress',
+    tips: 'Tips & Support',
+  };
+
+  if (type === 'tips') {
+    return 'You’ve finished the support loop — returning you to Home to choose the next round.';
+  }
+
+  return `Great work — next up is ${labels[nextTab]}.`;
 }

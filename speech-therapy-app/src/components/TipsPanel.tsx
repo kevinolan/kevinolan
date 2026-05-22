@@ -67,7 +67,7 @@ const TIPS = [
   {
     icon: '👥',
     title: 'Join a Support Group',
-    body: 'Organisations like NSA (USA), BSA (UK), and ASHA connect you with other people who stutter. Community is powerful.',
+    body: 'Organizations like NSA (USA), BSA (UK), and ASIA connect you with other people who stutter. Community is powerful.',
   },
 ];
 
@@ -75,7 +75,7 @@ const RESOURCES = [
   { label: 'National Stuttering Association (NSA)', url: 'https://www.stutteringhelp.org', region: '🇺🇸' },
   { label: 'British Stammering Association (BSA)', url: 'https://stamma.org', region: '🇬🇧' },
   { label: 'Stuttering Foundation', url: 'https://www.stutteringhelp.org', region: '🌍' },
-  { label: 'American Speech-Language-Hearing Association (ASHA)', url: 'https://www.asha.org/public/speech/disorders/stuttering/', region: '🇺🇸' },
+  { label: 'American Speech-Language-Hearing Association (ASIA)', url: 'https://www.asha.org/public/speech/disorders/stuttering/', region: '🇺🇸' },
 ];
 
 export default function TipsPanel({ onSessionComplete }: Props) {
@@ -122,7 +122,7 @@ export default function TipsPanel({ onSessionComplete }: Props) {
     <div>
       <h2 className="section-heading">💡 Tips & Support</h2>
       <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem', fontSize: '0.9rem' }}>
-        Evidence-based strategies, affirmations, and resources to support your journey.
+        Evidence-based strategies, affirmations, and resources to support your journey step by step.
       </p>
 
       {/* Affirmations */}
@@ -163,13 +163,13 @@ export default function TipsPanel({ onSessionComplete }: Props) {
         </p>
         <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
           Effective management includes fluency shaping techniques, stuttering modification therapy, acceptance and commitment approaches,
-          and support from speech-language pathologists (SLPs). There is no "cure", but with practice, confidence and fluency can significantly improve.
+          and support from speech-language pathologists (SLPs). There is no "cure", but with steady practice, confidence and fluency can improve over time.
         </p>
       </div>
 
       {/* Resources */}
       <div className="card">
-        <div className="card-title">🌐 Resources & Support Organisations</div>
+        <div className="card-title">🌐 Resources & Support Organizations</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
           {RESOURCES.map(r => (
             <a
