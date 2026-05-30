@@ -7,6 +7,7 @@ import SpeechExercises from './components/SpeechExercises';
 import VoiceRecorder from './components/VoiceRecorder';
 import ProgressTracker from './components/ProgressTracker';
 import TipsPanel from './components/TipsPanel';
+import { dumpPerfMeasures } from './utils/perf';
 
 interface NavItem {
   id: Tab;
@@ -75,6 +76,16 @@ export default function App() {
       <footer className="app-footer">
         FluentPath — Speech Therapy App for People Who Stutter &nbsp;·&nbsp;
         <span style={{ fontSize: '0.8em' }}>Always work with a qualified speech-language pathologist for clinical guidance.</span>
+        {import.meta.env.DEV && (
+          <button
+            style={{ marginLeft: '1rem' }}
+            className="btn-ghost btn-sm"
+            onClick={() => dumpPerfMeasures()}
+            title="Dump perf measures to console"
+          >
+            🧪 Perf
+          </button>
+        )}
       </footer>
     </>
   );
