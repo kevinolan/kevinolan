@@ -23,8 +23,16 @@ function load(): Session[] {
 }
 
 function save(sessions: Session[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  // Debounce writes to localStorage to avoid frequent synchronous I/O
+  if (typeof window === 'undefined') return;
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = window.setTimeout(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    saveTimeout = null;
+  }, 200);
 }
+
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>(load);

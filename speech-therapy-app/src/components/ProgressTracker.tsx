@@ -1,4 +1,5 @@
 import type { Session } from '../hooks/useSessions';
+import { useRenderPerf } from '../utils/perf';
 import { calcStreak, formatDate } from '../utils/helpers';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Achievement {
 }
 
 export default function ProgressTracker({ sessions, onClear }: Props) {
+  useRenderPerf('ProgressTracker');
   const totalSessions = sessions.length;
   const totalMinutes = Math.round(sessions.reduce((a, s) => a + s.durationSec, 0) / 60);
   const streak = calcStreak(sessions);
