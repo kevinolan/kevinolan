@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useRenderPerf } from '../utils/perf';
 import type { Session } from '../hooks/useSessions';
 
 interface Props {
@@ -79,9 +80,18 @@ const RESOURCES = [
 ];
 
 export default function TipsPanel({ onSessionComplete }: Props) {
+  useRenderPerf('TipsPanel');
   const [affIdx, setAffIdx] = useState(() => Math.floor(Math.random() * AFFIRMATIONS.length));
   const [visible, setVisible] = useState(true);
-  const startRef = useState<number>(() => Date.now())[0];
+  const startRef = useRef<number>(Date.now());
+
+  function handleMouseEnter(e: React.MouseEvent<HTMLElement>) {
+    (e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)';
+  }
+
+  function handleMouseLeave(e: React.MouseEvent<HTMLElement>) {
+    (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+  }
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -191,8 +201,8 @@ export default function TipsPanel({ onSessionComplete }: Props) {
                 fontSize: '0.9rem',
                 transition: 'all 0.18s',
               }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--primary)')}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
             >
               <span>{r.region}</span>
               <span style={{ flex: 1 }}>{r.label}</span>

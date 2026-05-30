@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useRenderPerf } from '../utils/perf';
 import type { Session } from '../hooks/useSessions';
 
 interface RecordingEntry {
@@ -15,11 +16,13 @@ interface Props {
 const BAR_COUNT = 40;
 
 export default function VoiceRecorder({ onSessionComplete }: Props) {
+  useRenderPerf('VoiceRecorder');
   const [recordings, setRecordings] = useState<RecordingEntry[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [supported] = useState(() => !!navigator.mediaDevices?.getUserMedia);
-  const [bars, setBars] = useState<number[]>(Array(BAR_COUNT).fill(4));
+  const [ /* bars state removed to avoid per-frame re-renders */ , /*setBars*/ ] = useState<number[]>(Array(BAR_COUNT).fill(4));
+  const vizRef = useRef<HTMLDivElement | null>(null);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -56,11 +59,17 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
         const step = Math.floor(data.length / BAR_COUNT);
-        const newBars = Array.from({ length: BAR_COUNT }, (_, i) => {
-          const val = data[i * step] ?? 0;
-          return Math.max(4, (val / 255) * 72);
-        });
-        setBars(newBars);
+        if (vizRef.current) {
+          const children = vizRef.current.children;
+          for (let i = 0; i < BAR_COUNT; i++) {
+            const el = children[i] as HTMLElement | undefined;
+            if (!el) continue;
+            const val = data[i * step] ?? 0;
+            const h = Math.max(4, (val / 255) * 72);
+            el.style.height = `${h}px`;
+            el.style.opacity = isRecording ? '1' : '0.35';
+          }
+        }
         animFrameRef.current = requestAnimationFrame(drawBars);
       }
       drawBars();
@@ -142,15 +151,12 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           </div>
         ) : (
           <div className="recorder-section">
-            <div className="recorder-visualizer" aria-hidden>
-              {bars.map((h, i) => (
+            <div className="recorder-visualizer" ref={vizRef} aria-hidden>
+              {Array.from({ length: BAR_COUNT }).map((_, i) => (
                 <div
                   key={i}
                   className="viz-bar"
-                  style={{
-                    height: `${h}px`,
-                    opacity: isRecording ? 1 : 0.35,
-                  }}
+                  style={{ height: `4px`, opacity: isRecording ? 1 : 0.35 }}
                 />
               ))}
             </div>
