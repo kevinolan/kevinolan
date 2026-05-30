@@ -22,7 +22,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const [supported] = useState(() => !!navigator.mediaDevices?.getUserMedia);
   const [ /* bars state removed to avoid per-frame re-renders */ , /*setBars*/ ] = useState<number[]>(Array(BAR_COUNT).fill(4));
-  const vizRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -58,16 +58,23 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       function drawBars() {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
-        const step = Math.floor(data.length / BAR_COUNT);
-        if (vizRef.current) {
-          const children = vizRef.current.children;
-          for (let i = 0; i < BAR_COUNT; i++) {
-            const el = children[i] as HTMLElement | undefined;
-            if (!el) continue;
-            const val = data[i * step] ?? 0;
-            const h = Math.max(4, (val / 255) * 72);
-            el.style.height = `${h}px`;
-            el.style.opacity = isRecording ? '1' : '0.35';
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            const barW = w / BAR_COUNT;
+            const step = Math.floor(data.length / BAR_COUNT) || 1;
+            for (let i = 0; i < BAR_COUNT; i++) {
+              const val = data[i * step] ?? 0;
+              const barH = Math.max(4, (val / 255) * (h - 4));
+              const x = i * barW;
+              const y = h - barH;
+              ctx.fillStyle = isRecording ? 'rgba(79,142,247,1)' : 'rgba(79,142,247,0.35)';
+              ctx.fillRect(x + 1, y, Math.max(1, barW - 2), barH);
+            }
           }
         }
         animFrameRef.current = requestAnimationFrame(drawBars);
@@ -151,15 +158,14 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           </div>
         ) : (
           <div className="recorder-section">
-            <div className="recorder-visualizer" ref={vizRef} aria-hidden>
-              {Array.from({ length: BAR_COUNT }).map((_, i) => (
-                <div
-                  key={i}
-                  className="viz-bar"
-                  style={{ height: `4px`, opacity: isRecording ? 1 : 0.35 }}
-                />
-              ))}
-            </div>
+            <canvas
+              ref={canvasRef}
+              className="recorder-visualizer"
+              aria-hidden
+              width={800}
+              height={120}
+              style={{ width: '100%', height: '60px' }}
+            />
 
             {isRecording && (
               <div className="recorder-status">
