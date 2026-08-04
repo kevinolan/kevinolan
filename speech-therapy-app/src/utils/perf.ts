@@ -2,46 +2,29 @@ import { useEffect, useRef } from 'react';
 
 /**
  * Lightweight render profiler for development.
- * - Logs render counts and time between renders to the console.
- * - Adds Performance API marks/measures per render so you can inspect them
- *   in the browser Performance panel (DevTools → Performance).
+ * - Logs render counts to the console (measured once per commit, in a useEffect —
+ *   never mutate refs during render, since render must stay a pure function).
+ * - Adds Performance API marks so you can inspect them in the browser
+ *   Performance panel (DevTools → Performance).
  */
 export function useRenderPerf(name: string) {
   const renders = useRef(0);
-  renders.current += 1;
-  const tick = renders.current;
-
-  const startMark = `${name}-start-${tick}`;
-  const endMark = `${name}-end-${tick}`;
-
-  // Mark at render start (this runs during render)
-  try { performance.mark(startMark); } catch {}
 
   useEffect(() => {
-    // Mark after paint and measure the render duration
-    try {
-      performance.mark(endMark);
-      const measureName = `${name} render #${tick}`;
-      performance.measure(measureName, startMark, endMark);
-      const entries = performance.getEntriesByName(measureName, 'measure');
-      if (entries && entries.length) {
-        console.debug(`[perf] ${name} ${measureName} ${entries[0].duration.toFixed(1)}ms`);
-      } else {
-        // Fallback delta logging if measure not available
-        console.debug(`[perf] ${name} render #${tick}`);
-      }
-      // Clear to avoid unbounded growth
-      performance.clearMarks(startMark);
-      performance.clearMarks(endMark);
-      performance.clearMeasures(measureName);
-    } catch (e) {
-      // ignore in environments without Performance API
-    }
+    if (typeof performance === 'undefined') return;
+
+    renders.current += 1;
+    const tick = renders.current;
+    const markName = `${name}-render-${tick}`;
+
+    performance.mark(markName);
+    console.debug(`[perf] ${name} render #${tick}`);
+    performance.clearMarks(markName);
 
     return () => {
       console.debug(`[perf] ${name} unmounted after ${renders.current} renders`);
     };
-  }); // no deps -> runs after every render
+  });
 }
 
 /**
@@ -74,7 +57,7 @@ export function dumpPerfMeasures(clear = true) {
 
     console.table(rows);
     if (clear) performance.clearMeasures();
-  } catch (e) {
-    console.warn('[perf] dumpPerfMeasures failed', e);
+  } catch (err) {
+    console.warn('[perf] dumpPerfMeasures failed', err);
   }
 }

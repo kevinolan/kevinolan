@@ -83,7 +83,7 @@ export default function TipsPanel({ onSessionComplete }: Props) {
   useRenderPerf('TipsPanel');
   const [affIdx, setAffIdx] = useState(() => Math.floor(Math.random() * AFFIRMATIONS.length));
   const [visible, setVisible] = useState(true);
-  const startRef = useRef<number>(Date.now());
+  const startRef = useRef<number>(0);
 
   function handleMouseEnter(e: React.MouseEvent<HTMLElement>) {
     (e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)';
@@ -105,9 +105,11 @@ export default function TipsPanel({ onSessionComplete }: Props) {
   }, []);
 
   useEffect(() => {
-    // Log session when unmounting if they spent time here
+    // Log session when unmounting if they spent time here.
+    startRef.current = Date.now();
+    const start = startRef.current;
     return () => {
-      const elapsed = Math.round((Date.now() - startRef) / 1000);
+      const elapsed = Math.round((Date.now() - start) / 1000);
       if (elapsed > 10) {
         onSessionComplete({
           type: 'tips',
@@ -117,8 +119,7 @@ export default function TipsPanel({ onSessionComplete }: Props) {
         });
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onSessionComplete]);
 
   function nextAffirmation() {
     setVisible(false);
