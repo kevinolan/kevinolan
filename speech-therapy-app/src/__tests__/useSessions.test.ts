@@ -6,7 +6,7 @@ describe('useSessions', () => {
   test('addSession adds a session and persists to localStorage', () => {
     // Setup a fake localStorage
     const store: Record<string, string> = {};
-    // @ts-ignore
+    // @ts-expect-error partial localStorage mock is sufficient for this test
     global.localStorage = {
       getItem: (k: string) => store[k] ?? null,
       setItem: (k: string, v: string) => { store[k] = v; },

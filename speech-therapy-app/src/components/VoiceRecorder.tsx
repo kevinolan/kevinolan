@@ -21,10 +21,10 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [supported] = useState(() => !!navigator.mediaDevices?.getUserMedia);
-  const [ /* bars state removed to avoid per-frame re-renders */ , /*setBars*/ ] = useState<number[]>(Array(BAR_COUNT).fill(4));
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const mediaRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -41,12 +41,16 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
     return () => {
       stopAnimation();
       if (timerRef.current) clearInterval(timerRef.current);
+      // Release the microphone if the component unmounts mid-recording
+      if (mediaRef.current && mediaRef.current.state !== 'inactive') mediaRef.current.stop();
+      streamRef.current?.getTracks().forEach(t => t.stop());
     };
   }, []);
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
       // Set up audio visualiser
       const ctx = new AudioContext();
@@ -86,8 +90,8 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = () => {
         stopAnimation();
-        setBars(Array(BAR_COUNT).fill(4));
         stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
         ctx.close();
 
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
