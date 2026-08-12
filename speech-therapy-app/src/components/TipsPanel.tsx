@@ -84,32 +84,38 @@ export default function TipsPanel({ onSessionComplete }: Props) {
   const [affIdx, setAffIdx] = useState(() => Math.floor(Math.random() * AFFIRMATIONS.length));
   const [visible, setVisible] = useState(true);
   const startRef = useRef<number>(0);
+  const mountedRef = useRef<boolean>(true);
+  // Track pending setTimeout ids so we can cancel them on unmount.
+  const pendingTimers = useRef<number[]>([]);
 
-  function handleMouseEnter(e: React.MouseEvent<HTMLElement>) {
-    (e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)';
-  }
-
-  function handleMouseLeave(e: React.MouseEvent<HTMLElement>) {
-    (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+  function advanceAffirmation(fadeMs: number) {
+    setVisible(false);
+    const t = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      setAffIdx(i => (i + 1) % AFFIRMATIONS.length);
+      setVisible(true);
+    }, fadeMs);
+    pendingTimers.current.push(t);
   }
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => {
-        setAffIdx(i => (i + 1) % AFFIRMATIONS.length);
-        setVisible(true);
-      }, 400);
-    }, 8000);
-    return () => clearInterval(id);
+    const id = window.setInterval(() => advanceAffirmation(400), 8000);
+    return () => {
+      clearInterval(id);
+      pendingTimers.current.forEach(t => clearTimeout(t));
+      pendingTimers.current = [];
+    };
   }, []);
 
   useEffect(() => {
-    // Log session when unmounting if they spent time here.
+    // Record the mount time when the panel is shown, and log a session on the
+    // *real* unmount — guarded so React 18/19 StrictMode's double-invoke does
+    // not double-count.
     startRef.current = Date.now();
-    const start = startRef.current;
+    mountedRef.current = true;
     return () => {
-      const elapsed = Math.round((Date.now() - start) / 1000);
+      mountedRef.current = false;
+      const elapsed = Math.round((Date.now() - startRef.current) / 1000);
       if (elapsed > 10) {
         onSessionComplete({
           type: 'tips',
@@ -122,11 +128,7 @@ export default function TipsPanel({ onSessionComplete }: Props) {
   }, [onSessionComplete]);
 
   function nextAffirmation() {
-    setVisible(false);
-    setTimeout(() => {
-      setAffIdx(i => (i + 1) % AFFIRMATIONS.length);
-      setVisible(true);
-    }, 200);
+    advanceAffirmation(200);
   }
 
   return (
@@ -188,6 +190,7 @@ export default function TipsPanel({ onSessionComplete }: Props) {
               href={r.url}
               target="_blank"
               rel="noopener noreferrer"
+              className="resource-link"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -202,8 +205,6 @@ export default function TipsPanel({ onSessionComplete }: Props) {
                 fontSize: '0.9rem',
                 transition: 'all 0.18s',
               }}
-              onMouseEnter={handleMouseEnter}
-              onMouseLeave={handleMouseLeave}
             >
               <span>{r.region}</span>
               <span style={{ flex: 1 }}>{r.label}</span>

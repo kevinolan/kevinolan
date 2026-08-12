@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRenderPerf } from '../utils/perf';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { analyzeFluency } from '../lib/fluency';
 import type { Session } from '../hooks/useSessions';
 
 interface RecordingEntry {
@@ -22,6 +24,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const [supported] = useState(() => !!navigator.mediaDevices?.getUserMedia);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const speech = useSpeechRecognition();
 
   const mediaRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -29,6 +32,11 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
+  const mountedRef = useRef(true);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  // Mirror of recordings so the unmount cleanup can revoke object URLs
+  // without re-subscribing to `recordings` on every change.
+  const recordingsRef = useRef<RecordingEntry[]>([]);
 
   function stopAnimation() {
     if (animFrameRef.current !== null) {
@@ -38,12 +46,26 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   }
 
   useEffect(() => {
+    recordingsRef.current = recordings;
+  }, [recordings]);
+
+  // Derive the live fluency report during render (pure function of transcript + elapsed).
+  const liveReport = useMemo(
+    () => (speech.transcript ? analyzeFluency(speech.transcript, elapsed) : null),
+    [speech.transcript, elapsed],
+  );
+
+  useEffect(() => {
     return () => {
+      mountedRef.current = false;
       stopAnimation();
       if (timerRef.current) clearInterval(timerRef.current);
       // Release the microphone if the component unmounts mid-recording
       if (mediaRef.current && mediaRef.current.state !== 'inactive') mediaRef.current.stop();
       streamRef.current?.getTracks().forEach(t => t.stop());
+      // Free object URLs + audio context so we don't leak memory.
+      recordingsRef.current.forEach(r => URL.revokeObjectURL(r.url));
+      audioCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
@@ -54,6 +76,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
 
       // Set up audio visualiser
       const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
@@ -92,7 +115,8 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         stopAnimation();
         stream.getTracks().forEach(t => t.stop());
         streamRef.current = null;
-        ctx.close();
+        audioCtxRef.current?.close().catch(() => {});
+        audioCtxRef.current = null;
 
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
@@ -102,6 +126,13 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           label: `Recording ${new Date().toLocaleTimeString()}`,
           date: new Date().toISOString(),
         };
+
+        // The recorder may stop after the component unmounted (e.g. user
+        // navigated away) — only update state if we are still mounted.
+        if (!mountedRef.current) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         setRecordings(prev => [entry, ...prev]);
 
         const dur = Math.round((Date.now() - startTimeRef.current) / 1000);
@@ -118,6 +149,9 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       startTimeRef.current = Date.now();
       setIsRecording(true);
       setElapsed(0);
+      // Start live, on-device transcription in parallel with audio capture.
+      speech.reset();
+      if (speech.supported) speech.start();
 
       timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
     } catch {
@@ -128,6 +162,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   function stopRecording() {
     if (timerRef.current) clearInterval(timerRef.current);
     mediaRef.current?.stop();
+    speech.stop();
     setIsRecording(false);
     setElapsed(0);
   }
@@ -176,6 +211,41 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
                 <span className="rec-dot" />
                 Recording — {formatTime(elapsed)}
               </div>
+            )}
+
+            {speech.supported && speech.listening && (
+              <div className="recorder-transcript" aria-live="polite">
+                {speech.transcript || speech.interim ? (
+                  <>
+                    {speech.transcript}
+                    {speech.interim && <span className="transcript-interim"> {speech.interim}</span>}
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Listening… speak now.</span>
+                )}
+              </div>
+            )}
+
+            {liveReport && (
+              <div className="fluency-report" role="status">
+                <div className="fluency-summary">{liveReport.summary}</div>
+                <div className="fluency-stats">
+                  <span>🗣️ {liveReport.wordCount} words</span>
+                  <span>🔁 {liveReport.repetitions}</span>
+                  <span>〰️ {liveReport.prolongations}</span>
+                  <span>⏸️ {liveReport.blocks}</span>
+                  {liveReport.ratePerMin > 0 && <span>⏱️ ~{liveReport.ratePerMin}/min</span>}
+                </div>
+                <p className="fluency-note">
+                  Heuristic, on-device signal for self-awareness — not a clinical measure.
+                </p>
+              </div>
+            )}
+
+            {!speech.supported && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                Live transcription isn't supported in this browser — audio recording still works.
+              </p>
             )}
 
             <button

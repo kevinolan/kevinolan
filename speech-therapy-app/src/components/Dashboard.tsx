@@ -1,5 +1,7 @@
 import type { Session, Tab } from '../hooks/useSessions';
-import { calcStreak, formatDate } from '../utils/helpers';
+import { formatDate } from '../utils/helpers';
+import { summarize } from '../utils/stats';
+import StatsGrid from './StatsGrid';
 
 interface Props {
   sessions: Session[];
@@ -7,9 +9,7 @@ interface Props {
 }
 
 export default function Dashboard({ sessions, onNavigate }: Props) {
-  const totalSessions = sessions.length;
-  const totalMinutes = Math.round(sessions.reduce((a, s) => a + s.durationSec, 0) / 60);
-  const streak = calcStreak(sessions);
+  const stats = summarize(sessions);
 
   return (
     <div>
@@ -19,28 +19,7 @@ export default function Dashboard({ sessions, onNavigate }: Props) {
         <span className="dashboard-wave" aria-hidden>🗣️</span>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-card-icon">📅</span>
-          <span className="stat-card-value">{totalSessions}</span>
-          <span className="stat-card-label">Total Sessions</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">⏱️</span>
-          <span className="stat-card-value">{totalMinutes}</span>
-          <span className="stat-card-label">Minutes Practiced</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">🔥</span>
-          <span className="stat-card-value">{streak}</span>
-          <span className="stat-card-label">Day Streak</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">🏆</span>
-          <span className="stat-card-value">{calcBadges(totalSessions)}</span>
-          <span className="stat-card-label">Badges Earned</span>
-        </div>
-      </div>
+      <StatsGrid stats={stats} />
 
       <h3 className="section-heading">🚀 Quick Start</h3>
       <div className="quick-actions">
@@ -84,11 +63,7 @@ export default function Dashboard({ sessions, onNavigate }: Props) {
             ))}
           </div>
         </>
-      )}
+      )} 
     </div>
   );
-}
-
-function calcBadges(sessions: number): number {
-  return Math.floor(sessions / 3);
 }

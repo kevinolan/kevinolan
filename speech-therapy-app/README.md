@@ -1,73 +1,68 @@
-# React + TypeScript + Vite
+# FluentPath — Speech Therapy App for People Who Stutter
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A privacy-first, offline-capable web app for practising fluency and
+stuttering-modification techniques. Built with **React 19 + TypeScript + Vite**.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Breathing exercises** — diaphragmatic, box, and pursed-lip patterns with a guided visual timer.
+- **Speech exercises** — evidence-based techniques (slow/prolonged speech, easy onset, light articulatory contacts, cancellation, pull-out, voluntary stuttering).
+- **Voice recorder** — record, listen back, and see **live, on-device transcription** plus a **fluency/stutter-marker analysis** (repetitions, prolongations, blocks, speech rate).
+- **Progress tracker** — streaks, stats, weekly heatmap, activity breakdown, and achievement badges (persisted in `localStorage`).
+- **Tips & support** — affirmations, practical strategies, and vetted resources.
+- **AI Fluency Coach** — a supportive coaching chat (see below).
 
-## React Compiler
+> Everything runs client-side. Audio, transcripts, and analysis never leave the
+> browser unless you explicitly configure a coach endpoint.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## AI Fluency Coach
 
-## Expanding the ESLint configuration
+The "model" behind the coach is a carefully engineered coaching system prompt
+(`src/lib/coach.ts`) that fixes the assistant's persona, technique knowledge, and
+clinical safety boundaries, plus a provider-agnostic client for any
+OpenAI-compatible Chat Completions endpoint.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Zero-config, offline mode:** with no API key set, the app uses a built-in
+  rule-based local coach, so the feature always works.
+- **LLM mode:** copy `.env.example` to `.env.local` and set
+  `VITE_COACH_API_BASE`, `VITE_COACH_API_KEY`, and `VITE_COACH_MODEL`. Any
+  OpenAI-compatible endpoint works (OpenAI, OpenRouter, Ollama, etc.). On any API
+  error it gracefully falls back to the local coach.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+> The coach is a self-help aid, **not** a substitute for a licensed
+> speech-language pathologist.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Stutter recognition
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+`src/lib/fluency.ts` implements lightweight, on-device detection of surface
+disfluencies from a live transcript (repetitions like "I-I-I", prolongations like
+"Mmmmy", and inserted blocks). It is a heuristic self-awareness signal, not a
+clinical diagnosis. Live transcription uses the browser **Web Speech API**
+(`src/hooks/useSpeechRecognition.ts`).
+
+## Getting started
+
+```bash
+npm install
+npm run dev      # start the dev server
+npm run build    # typecheck (tsc -b) + production build
+npm run test     # run the vitest suite
+npm run lint     # eslint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Project layout
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+  components/        UI panels (Dashboard, Breathing, Exercises, Recorder, Progress, Tips, Coach)
+  hooks/            useSessions (state + persistence), useSpeechRecognition
+  lib/              coach.ts (coaching "model"), fluency.ts (stutter analysis)
+  utils/            helpers (streak/format), stats (shared stats), perf (dev profiler)
+  __tests__/        vitest specs
+```
+
+## Disclaimer
+
+FluentPath is an educational self-help tool. It does not provide medical advice or
+diagnosis. Always work with a qualified speech-language pathologist for clinical
+guidance.

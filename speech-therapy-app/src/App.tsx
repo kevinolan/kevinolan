@@ -7,7 +7,9 @@ import SpeechExercises from './components/SpeechExercises';
 import VoiceRecorder from './components/VoiceRecorder';
 import ProgressTracker from './components/ProgressTracker';
 import TipsPanel from './components/TipsPanel';
+import CoachPanel from './components/CoachPanel';
 import { dumpPerfMeasures } from './utils/perf';
+import { calcStreak } from './utils/helpers';
 
 interface NavItem {
   id: Tab;
@@ -22,11 +24,13 @@ const NAV: NavItem[] = [
   { id: 'recorder', icon: '🎙️', label: 'Record' },
   { id: 'progress', icon: '📊', label: 'Progress' },
   { id: 'tips', icon: '💡', label: 'Tips' },
+  { id: 'coach', icon: '🤖', label: 'Coach' },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const { sessions, addSession, clearSessions } = useSessions();
+  const streak = calcStreak(sessions);
 
   return (
     <>
@@ -70,6 +74,9 @@ export default function App() {
         )}
         {activeTab === 'tips' && (
           <TipsPanel onSessionComplete={addSession} />
+        )}
+        {activeTab === 'coach' && (
+          <CoachPanel sessions={sessions} streak={streak} />
         )}
       </main>
 
