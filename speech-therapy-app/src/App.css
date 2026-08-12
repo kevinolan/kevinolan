@@ -1,3 +1,15 @@
+.flag-high {
+  color: var(--danger);
+  font-weight: 600;
+}
+.flag-low {
+  color: var(--success);
+  font-weight: 600;
+}
+.model-report {
+  border-left: 3px solid var(--primary);
+}
+
 /* ── Layout ── */
 .app-header {
   background: var(--surface);

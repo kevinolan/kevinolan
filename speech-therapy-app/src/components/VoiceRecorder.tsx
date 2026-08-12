@@ -1,7 +1,18 @@
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+import { useState, useRef, useEffect } from 'react';
+=======
+>>>>>>> Stashed changes
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRenderPerf } from '../utils/perf';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzeFluency } from '../lib/fluency';
+<<<<<<< Updated upstream
+=======
+import { predictStutter } from '../lib/stutterModel';
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 import type { Session } from '../hooks/useSessions';
 
 interface RecordingEntry {
@@ -32,11 +43,24 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
   const mountedRef = useRef(true);
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Mirror of recordings so the unmount cleanup can revoke object URLs
   // without re-subscribing to `recordings` on every change.
   const recordingsRef = useRef<RecordingEntry[]>([]);
+<<<<<<< Updated upstream
+=======
+  // Deep model (fine-tuned ONNX) result for the most recent recording.
+  const [modelResult, setModelResult] = useState<{ probability: number; logit: number } | null>(null);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 
   function stopAnimation() {
     if (animFrameRef.current !== null) {
@@ -135,6 +159,9 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         }
         setRecordings(prev => [entry, ...prev]);
 
+        // Run the fine-tuned stutter-detection model on this recording (async).
+        void runDeepModel(blob);
+
         const dur = Math.round((Date.now() - startTimeRef.current) / 1000);
         onSessionComplete({
           type: 'recorder',
@@ -165,6 +192,28 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
     speech.stop();
     setIsRecording(false);
     setElapsed(0);
+  }
+
+  // Decode a recording blob to mono 16 kHz Float32 PCM and run the fine-tuned model.
+  async function runDeepModel(blob: Blob) {
+    setModelLoading(true);
+    setModelError(null);
+    try {
+      const arrayBuf = await blob.arrayBuffer();
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ac = new AC();
+      const audioBuf = await ac.decodeAudioData(arrayBuf);
+      const ch = audioBuf.numberOfChannels > 1 ? audioBuf.getChannelData(1) : audioBuf.getChannelData(0);
+      const pcm = new Float32Array(ch.length);
+      pcm.set(ch);
+      const res = await predictStutter(pcm, audioBuf.sampleRate);
+      await ac.close();
+      if (mountedRef.current) setModelResult(res);
+    } catch (e) {
+      if (mountedRef.current) setModelError(e instanceof Error ? e.message : 'model failed');
+    } finally {
+      if (mountedRef.current) setModelLoading(false);
+    }
   }
 
   function deleteRecording(id: string) {
@@ -213,6 +262,11 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
               </div>
             )}
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
             {speech.supported && speech.listening && (
               <div className="recorder-transcript" aria-live="polite">
                 {speech.transcript || speech.interim ? (
@@ -242,12 +296,47 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
               </div>
             )}
 
+<<<<<<< Updated upstream
+=======
+            {(modelLoading || modelResult || modelError) && (
+              <div className="fluency-report model-report" role="status">
+                {modelLoading && <div className="fluency-summary">🧠 Deep model analysing…</div>}
+                {modelError && (
+                  <div className="fluency-summary" style={{ color: 'var(--danger)' }}>
+                    Model unavailable: {modelError}
+                  </div>
+                )}
+                {modelResult && (
+                  <>
+                    <div className="fluency-summary">
+                      🧠 Trained model: P(stutter) = {(modelResult.probability * 100).toFixed(1)}%
+                    </div>
+                    <div className="fluency-stats">
+                      <span
+                        className={modelResult.probability > 0.5 ? 'flag-high' : 'flag-low'}
+                      >
+                        {modelResult.probability > 0.5 ? 'Above threshold' : 'Below threshold'}
+                      </span>
+                    </div>
+                    <p className="fluency-note">
+                      Fine-tuned CNN (librosa log-Mel features), runs fully on-device via ONNX. Threshold 0.5.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+>>>>>>> Stashed changes
             {!speech.supported && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                 Live transcription isn't supported in this browser — audio recording still works.
               </p>
             )}
 
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
             <button
               className={`recorder-btn btn-primary${isRecording ? ' recording' : ''}`}
               onClick={isRecording ? stopRecording : startRecording}

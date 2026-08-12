@@ -26,7 +26,11 @@ class StutterCNN(nn.Module):
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
+<<<<<<< Updated upstream
             nn.AdaptiveAvgPool2d((4, 4)),
+=======
+            nn.AvgPool2d((4, 8)),  # 16x32 -> 4x4 (fixed, ONNX-exportable)
+>>>>>>> Stashed changes
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
