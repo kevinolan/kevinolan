@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useRenderPerf } from '../utils/perf';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { analyzeFluency } from '../lib/fluency';
 import type { Session } from '../hooks/useSessions';
 
 interface RecordingEntry {
@@ -15,18 +18,25 @@ interface Props {
 const BAR_COUNT = 40;
 
 export default function VoiceRecorder({ onSessionComplete }: Props) {
+  useRenderPerf('VoiceRecorder');
   const [recordings, setRecordings] = useState<RecordingEntry[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [supported] = useState(() => !!navigator.mediaDevices?.getUserMedia);
-  const [bars, setBars] = useState<number[]>(Array(BAR_COUNT).fill(4));
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const speech = useSpeechRecognition();
 
   const mediaRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
+  const mountedRef = useRef(true);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  // Mirror of recordings so the unmount cleanup can revoke object URLs
+  // without re-subscribing to `recordings` on every change.
+  const recordingsRef = useRef<RecordingEntry[]>([]);
 
   function stopAnimation() {
     if (animFrameRef.current !== null) {
@@ -36,33 +46,64 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   }
 
   useEffect(() => {
+    recordingsRef.current = recordings;
+  }, [recordings]);
+
+  // Derive the live fluency report during render (pure function of transcript + elapsed).
+  const liveReport = useMemo(
+    () => (speech.transcript ? analyzeFluency(speech.transcript, elapsed) : null),
+    [speech.transcript, elapsed],
+  );
+
+  useEffect(() => {
     return () => {
+      mountedRef.current = false;
       stopAnimation();
       if (timerRef.current) clearInterval(timerRef.current);
+      // Release the microphone if the component unmounts mid-recording
+      if (mediaRef.current && mediaRef.current.state !== 'inactive') mediaRef.current.stop();
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      // Free object URLs + audio context so we don't leak memory.
+      recordingsRef.current.forEach(r => URL.revokeObjectURL(r.url));
+      audioCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-      // Set up audio visualizer
+      // Set up audio visualiser
       const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
       source.connect(analyser);
-      analyserRef.current = analyser;
 
       function drawBars() {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
-        const step = Math.floor(data.length / BAR_COUNT);
-        const newBars = Array.from({ length: BAR_COUNT }, (_, i) => {
-          const val = data[i * step] ?? 0;
-          return Math.max(4, (val / 255) * 72);
-        });
-        setBars(newBars);
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            const barW = w / BAR_COUNT;
+            const step = Math.floor(data.length / BAR_COUNT) || 1;
+            for (let i = 0; i < BAR_COUNT; i++) {
+              const val = data[i * step] ?? 0;
+              const barH = Math.max(4, (val / 255) * (h - 4));
+              const x = i * barW;
+              const y = h - barH;
+              ctx.fillStyle = isRecording ? 'rgba(79,142,247,1)' : 'rgba(79,142,247,0.35)';
+              ctx.fillRect(x + 1, y, Math.max(1, barW - 2), barH);
+            }
+          }
+        }
         animFrameRef.current = requestAnimationFrame(drawBars);
       }
       drawBars();
@@ -72,9 +113,10 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = () => {
         stopAnimation();
-        setBars(Array(BAR_COUNT).fill(4));
         stream.getTracks().forEach(t => t.stop());
-        ctx.close();
+        streamRef.current = null;
+        audioCtxRef.current?.close().catch(() => {});
+        audioCtxRef.current = null;
 
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
@@ -84,7 +126,14 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           label: `Recording ${new Date().toLocaleTimeString()}`,
           date: new Date().toISOString(),
         };
-        setRecordings((prev: RecordingEntry[]) => [entry, ...prev]);
+
+        // The recorder may stop after the component unmounted (e.g. user
+        // navigated away) — only update state if we are still mounted.
+        if (!mountedRef.current) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setRecordings(prev => [entry, ...prev]);
 
         const dur = Math.round((Date.now() - startTimeRef.current) / 1000);
         onSessionComplete({
@@ -100,8 +149,11 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       startTimeRef.current = Date.now();
       setIsRecording(true);
       setElapsed(0);
+      // Start live, on-device transcription in parallel with audio capture.
+      speech.reset();
+      if (speech.supported) speech.start();
 
-      timerRef.current = setInterval(() => setElapsed((s: number) => s + 1), 1000);
+      timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
     } catch {
       alert('Microphone access denied. Please allow microphone access in your browser settings.');
     }
@@ -110,15 +162,16 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   function stopRecording() {
     if (timerRef.current) clearInterval(timerRef.current);
     mediaRef.current?.stop();
+    speech.stop();
     setIsRecording(false);
     setElapsed(0);
   }
 
   function deleteRecording(id: string) {
-    setRecordings((prev: RecordingEntry[]) => {
-      const entry = prev.find((r: RecordingEntry) => r.id === id);
+    setRecordings(prev => {
+      const entry = prev.find(r => r.id === id);
       if (entry) URL.revokeObjectURL(entry.url);
-      return prev.filter((r: RecordingEntry) => r.id !== id);
+      return prev.filter(r => r.id !== id);
     });
   }
 
@@ -144,24 +197,55 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
           </div>
         ) : (
           <div className="recorder-section">
-            <div className="recorder-visualizer" aria-hidden>
-              {bars.map((h: number, i: number) => (
-                <div
-                  key={i}
-                  className="viz-bar"
-                  style={{
-                    height: `${h}px`,
-                    opacity: isRecording ? 1 : 0.35,
-                  }}
-                />
-              ))}
-            </div>
+            <canvas
+              ref={canvasRef}
+              className="recorder-visualizer"
+              aria-hidden
+              width={800}
+              height={120}
+              style={{ width: '100%', height: '60px' }}
+            />
 
             {isRecording && (
               <div className="recorder-status">
                 <span className="rec-dot" />
                 Recording — {formatTime(elapsed)}
               </div>
+            )}
+
+            {speech.supported && speech.listening && (
+              <div className="recorder-transcript" aria-live="polite">
+                {speech.transcript || speech.interim ? (
+                  <>
+                    {speech.transcript}
+                    {speech.interim && <span className="transcript-interim"> {speech.interim}</span>}
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Listening… speak now.</span>
+                )}
+              </div>
+            )}
+
+            {liveReport && (
+              <div className="fluency-report" role="status">
+                <div className="fluency-summary">{liveReport.summary}</div>
+                <div className="fluency-stats">
+                  <span>🗣️ {liveReport.wordCount} words</span>
+                  <span>🔁 {liveReport.repetitions}</span>
+                  <span>〰️ {liveReport.prolongations}</span>
+                  <span>⏸️ {liveReport.blocks}</span>
+                  {liveReport.ratePerMin > 0 && <span>⏱️ ~{liveReport.ratePerMin}/min</span>}
+                </div>
+                <p className="fluency-note">
+                  Heuristic, on-device signal for self-awareness — not a clinical measure.
+                </p>
+              </div>
+            )}
+
+            {!speech.supported && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                Live transcription isn't supported in this browser — audio recording still works.
+              </p>
             )}
 
             <button
@@ -183,7 +267,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         <div className="card">
           <div className="card-title">🎧 Your Recordings</div>
           <div className="recordings-list">
-            {recordings.map((r: RecordingEntry) => (
+            {recordings.map(r => (
               <div className="recording-entry" key={r.id}>
                 <span className="recording-label">{r.label}</span>
                 <audio controls src={r.url} />

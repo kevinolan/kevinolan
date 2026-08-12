@@ -1,5 +1,8 @@
 import type { Session } from '../hooks/useSessions';
-import { calcStreak, formatDate } from '../utils/helpers';
+import { useRenderPerf } from '../utils/perf';
+import { formatDate } from '../utils/helpers';
+import { summarize } from '../utils/stats';
+import StatsGrid from './StatsGrid';
 
 interface Props {
   sessions: Session[];
@@ -15,9 +18,9 @@ interface Achievement {
 }
 
 export default function ProgressTracker({ sessions, onClear }: Props) {
-  const totalSessions = sessions.length;
-  const totalMinutes = Math.round(sessions.reduce((a, s) => a + s.durationSec, 0) / 60);
-  const streak = calcStreak(sessions);
+  useRenderPerf('ProgressTracker');
+  const stats = summarize(sessions);
+  const { totalSessions, totalMinutes, streak } = stats;
 
   const achievements: Achievement[] = [
     { id: 'first', icon: '🎉', name: 'First Step', desc: 'Complete first session', unlocked: totalSessions >= 1 },
@@ -62,28 +65,10 @@ export default function ProgressTracker({ sessions, onClear }: Props) {
         </div>
       )}
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-card-icon">📅</span>
-          <span className="stat-card-value">{totalSessions}</span>
-          <span className="stat-card-label">Total Sessions</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">⏱️</span>
-          <span className="stat-card-value">{totalMinutes}</span>
-          <span className="stat-card-label">Minutes Practiced</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">🏆</span>
-          <span className="stat-card-value">{unlockedCount}/{achievements.length}</span>
-          <span className="stat-card-label">Achievements</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card-icon">🔥</span>
-          <span className="stat-card-value">{streak}</span>
-          <span className="stat-card-label">Day Streak</span>
-        </div>
-      </div>
+      <StatsGrid
+        stats={stats}
+        achievements={{ unlocked: unlockedCount, total: achievements.length }}
+      />
 
       {/* Weekly Activity */}
       <div className="card">

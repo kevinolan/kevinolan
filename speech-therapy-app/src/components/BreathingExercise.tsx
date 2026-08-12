@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useRenderPerf } from '../utils/perf';
 import type { Session } from '../hooks/useSessions';
 
 interface Technique {
@@ -53,6 +54,7 @@ interface Props {
 }
 
 export default function BreathingExercise({ onSessionComplete }: Props) {
+  useRenderPerf('BreathingExercise');
   const [selectedId, setSelectedId] = useState(TECHNIQUES[0].id);
   const [running, setRunning] = useState(false);
   const [phaseIdx, setPhaseIdx] = useState(0);

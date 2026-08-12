@@ -7,6 +7,9 @@ import SpeechExercises from './components/SpeechExercises';
 import VoiceRecorder from './components/VoiceRecorder';
 import ProgressTracker from './components/ProgressTracker';
 import TipsPanel from './components/TipsPanel';
+import CoachPanel from './components/CoachPanel';
+import { dumpPerfMeasures } from './utils/perf';
+import { calcStreak } from './utils/helpers';
 
 interface NavItem {
   id: Tab;
@@ -21,12 +24,14 @@ const NAV: NavItem[] = [
   { id: 'recorder', icon: '🎙️', label: 'Record' },
   { id: 'progress', icon: '📊', label: 'Progress' },
   { id: 'tips', icon: '💡', label: 'Tips' },
+  { id: 'coach', icon: '🤖', label: 'Coach' },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [nextStepNotice, setNextStepNotice] = useState<string | null>(null);
   const { sessions, addSession, clearSessions } = useSessions();
+  const streak = calcStreak(sessions);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -98,11 +103,24 @@ export default function App() {
         {activeTab === 'tips' && (
           <TipsPanel onSessionComplete={handleSessionComplete} />
         )}
+        {activeTab === 'coach' && (
+          <CoachPanel sessions={sessions} streak={streak} />
+        )}
       </main>
 
       <footer className="app-footer">
-        FluentPath — gradual stuttering support &nbsp;·&nbsp;
+        FluentPath — Speech Therapy App for People Who Stutter &nbsp;·&nbsp;
         <span style={{ fontSize: '0.8em' }}>Always work with a qualified speech-language pathologist for clinical guidance.</span>
+        {import.meta.env.DEV && (
+          <button
+            style={{ marginLeft: '1rem' }}
+            className="btn-ghost btn-sm"
+            onClick={() => dumpPerfMeasures()}
+            title="Dump perf measures to console"
+          >
+            🧪 Perf
+          </button>
+        )}
       </footer>
     </>
   );
@@ -120,6 +138,7 @@ function getNextTab(type: Tab): Tab {
       return 'home';
     case 'home':
     case 'progress':
+    case 'coach':
     default:
       return 'home';
   }
@@ -133,6 +152,7 @@ function getNextStepNotice(type: Tab, nextTab: Tab): string {
     recorder: 'Record & Listen',
     progress: 'Progress',
     tips: 'Tips & Support',
+    coach: 'Coach',
   };
 
   if (type === 'tips') {
