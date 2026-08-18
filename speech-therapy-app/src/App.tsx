@@ -104,7 +104,7 @@ export default function App() {
           <TipsPanel onSessionComplete={handleSessionComplete} />
         )}
         {activeTab === 'coach' && (
-          <CoachPanel sessions={sessions} streak={streak} />
+          <CoachPanel streak={streak} />
         )}
       </main>
 

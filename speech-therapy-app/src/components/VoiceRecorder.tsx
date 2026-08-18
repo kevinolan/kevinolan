@@ -1,18 +1,9 @@
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-import { useState, useRef, useEffect } from 'react';
-=======
->>>>>>> Stashed changes
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRenderPerf } from '../utils/perf';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzeFluency } from '../lib/fluency';
-<<<<<<< Updated upstream
-=======
 import { predictStutter } from '../lib/stutterModel';
->>>>>>> Stashed changes
->>>>>>> Stashed changes
+import { ingestRecording } from '../lib/metricsStore';
 import type { Session } from '../hooks/useSessions';
 
 interface RecordingEntry {
@@ -43,24 +34,18 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
   const mountedRef = useRef(true);
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Mirror of recordings so the unmount cleanup can revoke object URLs
   // without re-subscribing to `recordings` on every change.
   const recordingsRef = useRef<RecordingEntry[]>([]);
-<<<<<<< Updated upstream
-=======
+  // Most recent recording duration (seconds), captured at stop so runDeepModel can ingest it.
+  const durationSecRef = useRef(0);
+
   // Deep model (fine-tuned ONNX) result for the most recent recording.
   const [modelResult, setModelResult] = useState<{ probability: number; logit: number } | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 
   function stopAnimation() {
     if (animFrameRef.current !== null) {
@@ -163,6 +148,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
         void runDeepModel(blob);
 
         const dur = Math.round((Date.now() - startTimeRef.current) / 1000);
+        durationSecRef.current = dur;
         onSessionComplete({
           type: 'recorder',
           label: 'Voice Recording',
@@ -198,6 +184,7 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
   async function runDeepModel(blob: Blob) {
     setModelLoading(true);
     setModelError(null);
+    let pStutter: number | null = null;
     try {
       const arrayBuf = await blob.arrayBuffer();
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -209,10 +196,20 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
       const res = await predictStutter(pcm, audioBuf.sampleRate);
       await ac.close();
       if (mountedRef.current) setModelResult(res);
+      pStutter = res.probability;
     } catch (e) {
       if (mountedRef.current) setModelError(e instanceof Error ? e.message : 'model failed');
     } finally {
       if (mountedRef.current) setModelLoading(false);
+    }
+
+    // Ingest this recording's measured signal into the local offline store so the
+    // AI agent (Coach tab) can reason over real data — no network involved.
+    try {
+      const report = analyzeFluency(speech.transcript || '', durationSecRef.current || 0);
+      ingestRecording({ durationSec: durationSecRef.current, pStutter, report });
+    } catch {
+      /* ingestion failure must never break the recorder */
     }
   }
 
@@ -262,11 +259,6 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
               </div>
             )}
 
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
             {speech.supported && speech.listening && (
               <div className="recorder-transcript" aria-live="polite">
                 {speech.transcript || speech.interim ? (
@@ -296,8 +288,6 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
               </div>
             )}
 
-<<<<<<< Updated upstream
-=======
             {(modelLoading || modelResult || modelError) && (
               <div className="fluency-report model-report" role="status">
                 {modelLoading && <div className="fluency-summary">🧠 Deep model analysing…</div>}
@@ -326,17 +316,12 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
               </div>
             )}
 
->>>>>>> Stashed changes
             {!speech.supported && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                 Live transcription isn't supported in this browser — audio recording still works.
               </p>
             )}
 
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
->>>>>>> Stashed changes
             <button
               className={`recorder-btn btn-primary${isRecording ? ' recording' : ''}`}
               onClick={isRecording ? stopRecording : startRecording}

@@ -104,7 +104,7 @@ function localCoach(req: CoachRequest): string {
   } else if (/(how|technique|start|begin|practice|exercise)/.test(m)) {
     body =
       "Pick ONE technique per session so it sticks. Today, try slow & prolonged speech: stretch every vowel to about twice its normal length and keep your jaw loose. Record 30 seconds and listen back — that feedback loop is gold.";
-  } else if (/(give up|hopeless|can't|never|worthless|pointless)/.test(m)) {
+  } else if (/(give up|giving up|hopeless|can't|never|worthless|pointless)/.test(m)) {
     body =
       "I hear how heavy this feels, and it's okay to have that day. Fluency is a long game — a single rough session says nothing about your worth or your trajectory. Be as kind to yourself as you'd be to a friend. If these feelings get big, please reach out to someone you trust or a crisis line (988 in the US).";
   } else {

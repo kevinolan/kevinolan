@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRenderPerf } from '../utils/perf';
-import { getCoaching, type CoachContext, type CoachMessage } from '../lib/coach';
-import type { Session } from '../hooks/useSessions';
+import { runAgent, type AgentResult } from '../lib/agent';
+import { summarizeMetrics } from '../lib/metricsStore';
 
 interface Props {
-  sessions: Session[];
   streak: number;
 }
 
@@ -15,27 +14,14 @@ const QUICK_PROMPTS = [
   'I feel like giving up.',
 ];
 
-function recentActivitySummary(sessions: Session[]): string {
-  const counts: Record<string, number> = {};
-  for (const s of sessions.slice(0, 20)) {
-    counts[s.type] = (counts[s.type] ?? 0) + 1;
-  }
-  const parts = Object.entries(counts).map(([type, n]) => `${type} ×${n}`);
-  return parts.length ? parts.join(', ') : 'no sessions yet';
-}
-
-export default function CoachPanel({ sessions, streak }: Props) {
+export default function CoachPanel({ streak }: Props) {
   useRenderPerf('CoachPanel');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ from: 'user' | 'coach'; text: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [usingLocal, setUsingLocal] = useState<boolean | null>(null);
+  const [dataContext, setDataContext] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const context: CoachContext = {
-    recentActivity: recentActivitySummary(sessions),
-    streak,
-  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -45,8 +31,8 @@ export default function CoachPanel({ sessions, streak }: Props) {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
 
-    const history: CoachMessage[] = messages.map(m => ({
-      role: m.from === 'user' ? 'user' : 'assistant',
+    const history = messages.map(m => ({
+      role: (m.from === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.text,
     }));
 
@@ -54,11 +40,15 @@ export default function CoachPanel({ sessions, streak }: Props) {
     setInput('');
     setBusy(true);
 
-    const result = await getCoaching({ message: trimmed, history, context });
+    // v1 offline agent: reads the user's measured fluency signal and asks the coach.
+    const result: AgentResult = await runAgent({ message: trimmed, history });
     setUsingLocal(result.local);
+    setDataContext(result.dataContext);
     setMessages(prev => [...prev, { from: 'coach', text: result.reply }]);
     setBusy(false);
   }
+
+  const summary = summarizeMetrics();
 
   return (
     <div>
@@ -67,6 +57,21 @@ export default function CoachPanel({ sessions, streak }: Props) {
         A supportive coach for practice motivation and technique tips. Works offline with a
         built-in coach; connect an LLM in <code>.env.local</code> for more personalized replies.
       </p>
+
+      <div className="card metrics-card">
+        <div className="card-title">📈 Your measured signal <span className="offline-badge">100% offline</span></div>
+        <p className="metrics-headline">{summary.headline}</p>
+        {dataContext && dataContext !== summary.headline && (
+          <p className="metrics-datacontext">{dataContext}</p>
+        )}
+        {streak > 0 && (
+          <p className="metrics-streak">🔥 {streak}-day practice streak</p>
+        )}
+        <p className="fluency-note">
+          Aggregated on-device from your recordings (model P(stutter) + technique counts).
+          The coach below reasons over this — nothing leaves your device.
+        </p>
+      </div>
 
       <div className="coach-card">
         <div className="coach-chat" ref={scrollRef}>
