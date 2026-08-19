@@ -12,11 +12,15 @@
  */
 import { openDb } from './db.js';
 import { createApp } from './app.js';
+import { ensureSeeded } from './repo.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
 async function main() {
   const handle = await openDb();
+  // Single-writer seed: creates a default clinician if none exists, through the
+  // same connection the server uses (no separate-connection race).
+  ensureSeeded(handle);
   const app = createApp(handle);
 
   let shuttingDown = false;

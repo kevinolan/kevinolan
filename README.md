@@ -5,9 +5,9 @@ A speech-fluency therapy platform with three tiers that share one typed contract
 | Package | Stack | Purpose |
 | --- | --- | --- |
 | `shared/` | TypeScript + zod (dependency-free) | Domain types + validation schemas — the API contract consumed by every tier. |
-| `backend/` | Node.js + Express + TypeScript (tsx) + **sql.js** (WASM SQLite) | Metrics ingestion + user store + REST API. |
+| `backend/` | Node.js + Express + TypeScript (tsx) + **sql.js** (WASM SQLite) | Metrics ingestion + user store + REST API + minimal JWT auth. |
+| `web-admin/` | Next.js (App Router) | Clinician dashboard — login + patient list with aggregated fluency stats. |
 | `speech-therapy-app/` | React 19 + Vite + on-device ONNX | Existing client PWA (records audio, runs the fine-tuned model locally, ingests metrics). |
-| *(next)* `web-admin/` | Next.js | Clinician dashboard — consumes `backend` read APIs. |
 | *(next)* `mobile/` | React Native | Client app — reuses the on-device model + coach, syncs metrics to `backend`. |
 
 ## Architecture
@@ -39,16 +39,40 @@ npm run db:reset   # wipe the dev database (data/fluentpath.db)
 ```
 
 ### API
-| Method | Path | Body | Returns |
-| --- | --- | --- | --- |
-| GET | `/api/health` | — | `{ ok, time }` |
-| POST | `/api/users` | `CreateUser` | `201 User` |
-| GET | `/api/users` | — | `User[]` |
-| GET | `/api/users/:id` | — | `User` (404 if missing) |
-| POST | `/api/metrics` | `IngestMetrics` (batch, ≤200) | `202 { accepted, rejected, serverTime }` |
-| GET | `/api/users/:id/metrics?limit=` | — | `StoredMetric[]` (newest-first, 404 if user missing) |
+| Method | Path | Auth | Body | Returns |
+| --- | --- | --- | --- | --- |
+| GET | `/api/health` | open | — | `{ ok, time }` |
+| POST | `/api/auth/login` | open | `LoginRequest` | `200 AuthResponse { token, user }` (401 on bad creds) |
+| GET | `/api/me` | token | — | `User` (the caller) |
+| POST | `/api/users` | open* | `CreateUser` | `201 User` (*never accepts a password) |
+| POST | `/api/metrics` | open | `IngestMetrics` (batch, ≤200) | `202 { accepted, rejected, serverTime }` |
+| GET | `/api/users/:id` | token | — | `User` (404 if missing) |
+| GET | `/api/users/:id/metrics?limit=` | token | — | `StoredMetric[]` (newest-first) |
+| GET | `/api/users/:id/summary` | token | — | `UserSummary` (aggregates + trend) |
+| GET | `/api/patients` | clinician | — | `UserSummary[]` (all clients) |
 
-All request/response shapes are in `shared/src/domain.ts`.
+All request/response shapes are in `shared/src/domain.ts`. **Auth model:** client
+endpoints (create user, ingest metrics) stay open so the PWA/mobile can sync
+without a login — they only ever write their own `userId`'s metrics by UUID and
+cannot read anyone else's. Clinician read endpoints require a `Bearer` JWT
+(`Authorization` header); `/api/patients` is further restricted to the
+`clinician` role. Passwords are scrypt-hashed; tokens are HS256 JWTs (12h). **Set
+`JWT_SECRET` in any real deployment** — there is a dev-only fallback that must
+not be used in production.
+
+### Web admin
+```bash
+cd web-admin
+npm install
+npm run dev        # http://localhost:3000 (set NEXT_PUBLIC_BACKEND_URL to the backend)
+```
+The backend **auto-seeds a default clinician on startup** (via `repo.ensureSeeded`,
+using the server's own connection — required because sql.js is single-process).
+Default credentials unless overridden by env:
+`clinician@fluentpath.dev` / `fluentpath-dev-1234`. Override with
+`CLINICIAN_EMAIL` / `CLINICIAN_PASSWORD` / `CLINICIAN_NAME` (set `JWT_SECRET` in
+prod). The `npm run seed:clinician` script is an offline alternative for seeding a
+DB file that no running server holds.
 
 ### Data layer
 - **sql.js (pure-WASM SQLite)** — chosen because this environment has no reliable
@@ -63,15 +87,17 @@ All request/response shapes are in `shared/src/domain.ts`.
   multi-instance / production, use `better-sqlite3` (file locking) or a server DB.
 
 ## What's verified
-- `backend`: `tsc --noEmit` clean, 8 vitest integration tests (real in-memory
+- `backend`: `tsc --noEmit` clean, 11 vitest integration tests (real in-memory
   SQLite via supertest) covering users CRUD, metrics ingest + read, validation
-  rejections, user-scoping, and 404s.
+  rejections, user-scoping, 401/403 auth gating, login, and clinician patient
+  summaries with trend.
+- `shared`: `tsc --noEmit` clean (contract types + zod schemas).
+- `web-admin`: `next build` succeeds (App Router, login + patient list + detail).
 - Live smoke test confirmed a user + metric survive a full server restart
   (write-through persistence).
 
 ## Not yet built (next slices, per plan)
-- `web-admin/` (Next.js) — clinician dashboard over the read APIs above.
 - `mobile/` (React Native) — client app reusing the on-device coach/model and
   posting metrics to `/api/metrics`.
-- Auth (the API is currently unauthenticated — add token/session middleware
-  before any deployment).
+- Production hardening: real secret management, refresh tokens, rate limiting,
+  and a production-grade DB (better-sqlite3 / Postgres) — sql.js is single-process.

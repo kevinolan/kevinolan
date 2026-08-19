@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('client','clinician')),
+  password_hash TEXT,            -- null for clients created by the app (no login yet)
   created_at TEXT NOT NULL
 );
 
@@ -78,6 +79,12 @@ export async function openDb(dbPath: string = DB_PATH): Promise<DbHandle> {
     db = new SQL.Database();
   }
   db.run(SCHEMA);
+  // Migration: older DB files created before password_hash existed. On a fresh
+  // DB the column is already present (it's in SCHEMA), so only add if missing.
+  const hasCol = db.exec("PRAGMA table_info(users)").some((t) =>
+    (t.values ?? []).some((row) => String(row[1]).toLowerCase() === 'password_hash'),
+  );
+  if (!hasCol) db.run('ALTER TABLE users ADD COLUMN password_hash TEXT;');
 
   const persist = () => {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });

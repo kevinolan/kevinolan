@@ -3,6 +3,7 @@
 
 # Build output
 **/dist/
+**/.next/
 
 # Local dev data + logs
 backend/data/

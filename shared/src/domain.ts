@@ -52,8 +52,41 @@ export const CreateUserSchema = z.object({
   email: z.string().email(),
   displayName: z.string().min(1).max(80),
   role: z.enum(['client', 'clinician']).default('client'),
+  /** Required when seeding a clinician via admin tooling; never accepted from the public user-create endpoint. */
+  password: z.string().min(8).optional(),
 });
 export type CreateUser = z.infer<typeof CreateUserSchema>;
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+
+export const LoginRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+
+export const AuthResponseSchema = z.object({
+  token: z.string().min(1),
+  user: UserSchema,
+});
+export type AuthResponse = z.infer<typeof AuthResponseSchema>;
+
+// ── Aggregated per-patient summary (clinician dashboard) ─────────────────────
+
+/** Stat bundle for one patient. Computed server-side over their stored metrics. */
+export interface UserSummary {
+  id: string;
+  email: string;
+  displayName: string;
+  createdAt: string;
+  metricCount: number;
+  earliestAt: string | null;
+  latestAt: string | null;
+  avgPStutter: number | null;
+  avgDisfluencies: number | null;
+  avgRatePerMin: number | null;
+  trend: 'up' | 'down' | 'flat';
+}
 
 // ── API envelopes ───────────────────────────────────────────────────────────
 
