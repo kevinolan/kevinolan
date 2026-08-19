@@ -4,6 +4,10 @@
 # Build output
 **/dist/
 
+# Local dev data + logs
+backend/data/
+*.log
+
 # Editor
 .vscode/
 .idea/
