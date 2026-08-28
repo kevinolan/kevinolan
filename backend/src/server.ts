@@ -13,10 +13,14 @@
 import { openDb } from './db.js';
 import { createApp } from './app.js';
 import { ensureSeeded } from './repo.js';
+import { assertSecrets } from './config.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
 async function main() {
+  // Fail closed: refuse to boot in production without a strong JWT secret or
+  // with open CORS. Must run before any token is signed.
+  assertSecrets();
   const handle = await openDb();
   // Single-writer seed: creates a default clinician if none exists, through the
   // same connection the server uses (no separate-connection race).

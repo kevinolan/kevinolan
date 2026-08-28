@@ -1,29 +1,27 @@
 /**
- * Minimal, dependency-free auth primitives.
+ * Dependency-free auth primitives.
  *
- * - Passwords: scrypt (Node crypto) with a per-user random salt. No plaintext or
- *   reversible storage.
- * - Tokens: HMAC-SHA256 (HS256) JWT, signed with a server secret. Stateless —
- *   the clinician dashboard sends `Authorization: Bearer <token>` and we verify
- *   the signature + expiry locally (no session store).
+ * Passwords: scrypt (Node crypto) with a per-user random salt. Never stored in
+ * plaintext or reversibly.
  *
- * This is "minimal auth" not "full auth": there's no refresh rotation, rate
- * limiting, or MFA. It is enough to scope clinician vs. client and protect the
- * read APIs. Put real secrets in the environment before any deployment.
+ * Sessions use a two-token model:
+ *  - **access token**: HS256 JWT, short-lived (15 min), stateless, carries the
+ *    user id + role. Sent as `Authorization: Bearer <jwt>`.
+ *  - **refresh token**: opaque random string, long-lived (7 days), stored hashed
+ *    in the DB (`refresh_tokens` table) and revocable. Used only at
+ *    `/api/auth/refresh` to mint a new access token, and at `/api/auth/logout`
+ *    to revoke. Opaque (not a JWT) so it can be invalidated server-side.
+ *
+ * No external auth libraries — everything is Node `crypto`.
  */
-import { randomBytes, scryptSync, timingSafeEqual, createHmac, randomUUID } from 'node:crypto';
+import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
+import {
+  getJwtSecret,
+  ACCESS_TTL_SECONDS,
+  REFRESH_TTL_SECONDS,
+} from './config.js';
 
 const SCRYPT_KEYLEN = 64;
-const TOKEN_TTL_SECONDS = 60 * 60 * 12; // 12h clinician sessions
-
-function getSecret(): string {
-  const s = process.env.JWT_SECRET;
-  if (!s || s.length < 16) {
-    // Dev fallback so local runs work without config. NEVER rely on this in prod.
-    return 'dev-only-insecure-secret-change-me-please-0000';
-  }
-  return s;
-}
 
 // ── Passwords ────────────────────────────────────────────────────────────────
 
@@ -42,7 +40,18 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(candidate, expected);
 }
 
-// ── JWT (HS256) ───────────────────────────────────────────────────────────
+/** Password policy: length + at least one letter and one digit. */
+export function passwordError(password: string): string | null {
+  if (typeof password !== 'string' || password.length < 8) {
+    return 'Password must be at least 8 characters.';
+  }
+  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return 'Password must contain at least one letter and one number.';
+  }
+  return null;
+}
+
+// ── Access token (HS256 JWT) ────────────────────────────────────────────────
 
 interface JwtClaims {
   sub: string; // user id
@@ -64,11 +73,11 @@ function fromBase64url(s: string): Buffer {
 
 export function signToken(claims: { sub: string; role: 'client' | 'clinician'; email: string }): string {
   const now = Math.floor(Date.now() / 1000);
-  const payload: JwtClaims = { ...claims, exp: now + TOKEN_TTL_SECONDS };
+  const payload: JwtClaims = { ...claims, exp: now + ACCESS_TTL_SECONDS };
   const header = base64urlJson({ alg: 'HS256', typ: 'JWT' });
   const body = base64urlJson(payload);
   const data = `${header}.${body}`;
-  const sig = base64url(createHmac('sha256', getSecret()).update(data).digest());
+  const sig = base64url(createHmac('sha256', getJwtSecret()).update(data).digest());
   return `${data}.${sig}`;
 }
 
@@ -77,9 +86,8 @@ export function verifyToken(token: string): JwtClaims | null {
   if (parts.length !== 3) return null;
   const [header, body, sig] = parts;
   const expectedSig = base64url(
-    createHmac('sha256', getSecret()).update(`${header}.${body}`).digest(),
+    createHmac('sha256', getJwtSecret()).update(`${header}.${body}`).digest(),
   );
-  // Constant-time compare to avoid signature timing leaks.
   const a = Buffer.from(sig);
   const b = Buffer.from(expectedSig);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
@@ -92,11 +100,44 @@ export function verifyToken(token: string): JwtClaims | null {
   }
 }
 
+// ── Refresh token (opaque, server-stored) ───────────────────────────────────
+
+/** A freshly minted refresh token: the plaintext (returned once) + its SHA-256
+ *  hash (store this in the DB; never store the plaintext). */
+export interface RefreshToken {
+  plaintext: string; // returned to client, used at /refresh and /logout
+  hash: string; // store in DB
+  expiresAt: string; // ISO timestamp
+}
+
+export function issueRefreshToken(): RefreshToken {
+  const plaintext = randomBytes(40).toString('base64url');
+  return {
+    plaintext,
+    hash: sha256(plaintext),
+    expiresAt: new Date(Date.now() + REFRESH_TTL_SECONDS * 1000).toISOString(),
+  };
+}
+
+/**
+ * Hash a refresh-token plaintext for storage/lookup (constant representation).
+ *
+ * Keyed with the JWT secret (not a fixed literal) so the stored hashes are
+ * secret-dependent: a DB leak yields nothing reversible, and rotating
+ * JWT_SECRET cleanly invalidates every outstanding refresh grant. In dev the
+ * dev fallback secret is used; in production assertSecrets() has already
+ * guaranteed a real secret before any token is issued, so this never runs with
+ * an empty key.
+ */
+export function sha256(s: string): string {
+  return createHmac('sha256', getJwtSecret())
+    .update(s)
+    .digest('hex');
+}
+
 /** Extract a bearer token from an Authorization header, or null. */
 export function extractToken(authHeader: string | undefined): string | null {
   if (!authHeader) return null;
   const m = authHeader.match(/^Bearer\s+(.+)$/i);
   return m ? m[1] : null;
 }
-
-export { randomUUID };

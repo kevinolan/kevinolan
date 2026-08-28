@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { login, fetchPatients, type UserSummary } from '@/lib/api';
-
-const TOKEN_KEY = 'fluentpath_token';
+import { login, logout, fetchPatients, getSession, type UserSummary } from '@/lib/api';
 
 export default function HomePage() {
   const router = useRouter();
@@ -17,16 +15,16 @@ export default function HomePage() {
 
   // restore session
   useEffect(() => {
-    const t = sessionStorage.getItem(TOKEN_KEY);
-    if (t) {
-      setToken(t);
-      loadPatients(t);
+    const s = getSession();
+    if (s) {
+      setToken(s.token);
+      loadPatients();
     }
   }, []);
 
-  async function loadPatients(t: string) {
+  async function loadPatients() {
     try {
-      setPatients(await fetchPatients(t));
+      setPatients(await fetchPatients());
     } catch {
       setError('Could not load patients (is the backend running + seeded?)');
     }
@@ -38,9 +36,8 @@ export default function HomePage() {
     setError(null);
     try {
       const res = await login(email, password);
-      sessionStorage.setItem(TOKEN_KEY, res.token);
       setToken(res.token);
-      await loadPatients(res.token);
+      await loadPatients();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'login_failed');
     } finally {
@@ -48,8 +45,8 @@ export default function HomePage() {
     }
   }
 
-  function logout() {
-    sessionStorage.removeItem(TOKEN_KEY);
+  async function onLogout() {
+    await logout();
     setToken(null);
     setPatients([]);
   }
@@ -78,7 +75,7 @@ export default function HomePage() {
     <main className="container">
       <div className="row">
         <h1>Patients</h1>
-        <button onClick={logout} style={{ marginTop: 0 }}>Log out</button>
+        <button onClick={onLogout} style={{ marginTop: 0 }}>Log out</button>
       </div>
       {error && <div className="error">{error}</div>}
       {patients.length === 0 && <div className="card">No patients with recorded metrics yet.</div>}

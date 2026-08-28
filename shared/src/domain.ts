@@ -68,8 +68,18 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export const AuthResponseSchema = z.object({
   token: z.string().min(1),
   user: UserSchema,
+  /** Opaque refresh token (returned on login / refresh). Clients use it at
+   *  /api/auth/refresh to mint a new access token and at /api/auth/logout to
+   *  revoke. Optional so pre-refresh clients keep working. */
+  refreshToken: z.string().min(1).optional(),
 });
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
+
+/** Body for /api/auth/refresh and /api/auth/logout. */
+export const RefreshRequestSchema = z.object({
+  refreshToken: z.string().min(1),
+});
+export type RefreshRequest = z.infer<typeof RefreshRequestSchema>;
 
 // ── Aggregated per-patient summary (clinician dashboard) ─────────────────────
 
@@ -93,6 +103,8 @@ export interface UserSummary {
 export const ErrorSchema = z.object({
   error: z.string(),
   detail: z.string().optional(),
+  // Present on 429 responses so clients can surface a precise wait time.
+  retryAfter: z.number().int().nonnegative().optional(),
 });
 export type ApiError = z.infer<typeof ErrorSchema>;
 

@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { openMemoryDb, type DbHandle } from './db.js';
 import { createApp } from './app.js';
-import { signToken } from './auth.js';
-import { createUser } from './repo.js';
+import { signToken, issueRefreshToken } from './auth.js';
+import { createUser, insertRefreshToken, findRefreshToken } from './repo.js';
 
 function sampleMetric(over: Record<string, unknown> = {}) {
   return {
@@ -173,5 +173,94 @@ describe('backend API (in-memory DB)', () => {
       .get('/api/users/ghost/metrics')
       .set('Authorization', authHeader({ sub: 'ghost', role: 'clinician', email: 'x' }));
     expect(res.status).toBe(404);
+  });
+
+  test('login returns a refresh token and /refresh mints a new access token', async () => {
+    createUser(db, { email: 'doc@x.com', displayName: 'Dr', role: 'clinician', password: 'password123' });
+    db.persist();
+
+    const login = await request(app).post('/api/auth/login').send({ email: 'doc@x.com', password: 'password123' });
+    expect(login.status).toBe(200);
+    expect(login.body.refreshToken).toBeTruthy();
+
+    const refresh = await request(app).post('/api/auth/refresh').send({ refreshToken: login.body.refreshToken });
+    expect(refresh.status).toBe(200);
+    expect(refresh.body.token).toBeTruthy();
+    expect(refresh.body.refreshToken).toBeTruthy();
+
+    // The new access token must authenticate /api/me.
+    const me = await request(app).get('/api/me').set('Authorization', `Bearer ${refresh.body.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.email).toBe('doc@x.com');
+  });
+
+  test('/logout revokes the refresh token so /refresh fails afterwards', async () => {
+    createUser(db, { email: 'doc@x.com', displayName: 'Dr', role: 'clinician', password: 'password123' });
+    db.persist();
+    const login = await request(app).post('/api/auth/login').send({ email: 'doc@x.com', password: 'password123' });
+    const rt = login.body.refreshToken;
+
+    const logout = await request(app).post('/api/auth/logout').send({ refreshToken: rt });
+    expect(logout.status).toBe(204);
+
+    const refresh = await request(app).post('/api/auth/refresh').send({ refreshToken: rt });
+    expect(refresh.status).toBe(401);
+  });
+
+  test('/refresh rejects an unknown refresh token', async () => {
+    const res = await request(app).post('/api/auth/refresh').send({ refreshToken: 'not-a-real-token' });
+    expect(res.status).toBe(401);
+  });
+
+  test('/refresh requires a refreshToken body', async () => {
+    const res = await request(app).post('/api/auth/refresh').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_refresh');
+  });
+
+  test('account locks after too many failed logins (per-email)', async () => {
+    // LOGIN_MAX_ATTEMPTS defaults to 5 -> the 6th failure sets the lock, so the
+    // 7th attempt is rejected before authentication even runs.
+    for (let i = 0; i < 6; i++) {
+      const r = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'lockme@x.com', password: 'wrong' });
+      expect(r.status).toBe(401);
+    }
+    const locked = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'lockme@x.com', password: 'wrong' });
+    expect(locked.status).toBe(429);
+    expect(locked.body.error).toBe('account_locked');
+    expect(locked.headers['retry-after']).toBeDefined();
+  });
+
+  test('per-IP rate limit triggers on the auth surface', async () => {
+    // AUTH_RATE_LIMIT defaults to 20 (per 60s window). Use a distinct email
+    // per request so the per-email lockout never fires; only the IP cap should.
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) {
+      const r = await request(app)
+        .post('/api/auth/login')
+        .send({ email: `rl${i}@x.com`, password: 'wrong' });
+      statuses.push(r.status);
+    }
+    expect(statuses.slice(0, 20).every((s) => s === 401)).toBe(true);
+    expect(statuses[20]).toBe(429);
+    const over = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'rl21@x.com', password: 'wrong' });
+    expect(over.status).toBe(429);
+    expect(over.body.error).toBe('rate_limited');
+    expect(over.headers['retry-after']).toBeDefined();
+  });
+
+  test('db.clear() also drops refresh tokens so a stale grant cannot be replayed', async () => {
+    const u = createUser(db, { email: 'rt@x.com', displayName: 'RT', role: 'clinician', password: 'password123' });
+    const rt = issueRefreshToken();
+    insertRefreshToken(db, u.id, rt);
+    expect(findRefreshToken(db, rt.hash)).not.toBeNull();
+    db.clear();
+    expect(findRefreshToken(db, rt.hash)).toBeNull();
   });
 });

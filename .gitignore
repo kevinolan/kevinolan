@@ -4,6 +4,7 @@
 # Build output
 **/dist/
 **/.next/
+*.tsbuildinfo
 
 # Local dev data + logs
 backend/data/

@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { fetchSummary, type UserSummary } from '@/lib/api';
-
-const TOKEN_KEY = 'fluentpath_token';
+import { fetchSummary, getSession, type UserSummary } from '@/lib/api';
 
 export default function PatientPage() {
   const params = useParams<{ id: string }>();
@@ -13,12 +11,12 @@ export default function PatientPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = sessionStorage.getItem(TOKEN_KEY);
-    if (!t) {
+    const s = getSession();
+    if (!s) {
       setError('Not signed in');
       return;
     }
-    fetchSummary(t, id)
+    fetchSummary(id)
       .then(setSummary)
       .catch(() => setError('Could not load this patient'));
   }, [id]);

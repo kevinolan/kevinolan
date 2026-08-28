@@ -3,7 +3,15 @@
  * is trivially unit-testable with an in-memory DB.
  */
 import { randomUUID } from 'node:crypto';
-import { hashPassword, verifyPassword } from './auth.js';
+import {
+  hashPassword,
+  verifyPassword,
+  issueRefreshToken,
+  sha256,
+  passwordError,
+  type RefreshToken,
+} from './auth.js';
+import { isProd } from './config.js';
 import type { DbHandle } from './db.js';
 import type {
   IngestMetrics,
@@ -69,6 +77,15 @@ export function createUser(db: DbHandle, input: CreateUser): User {
 export function ensureSeeded(db: DbHandle): void {
   const email = (process.env.CLINICIAN_EMAIL ?? 'clinician@fluentpath.dev').toLowerCase();
   const password = process.env.CLINICIAN_PASSWORD ?? 'fluentpath-dev-1234';
+  // Fail closed in production: a weak seed password is a real vulnerability.
+  if (isProd) {
+    const weak = passwordError(password);
+    if (weak) {
+      throw new Error(
+        `Refusing to seed clinician in production: ${weak} Set a strong CLINICIAN_PASSWORD (>=8 chars, letters + digits).`,
+      );
+    }
+  }
   const name = process.env.CLINICIAN_NAME ?? 'Demo Clinician';
   const existing = db.db.exec('SELECT id FROM users WHERE email = ?', [email])[0]?.values ?? [];
   if (existing.length > 0) return;
@@ -111,6 +128,42 @@ export function authenticate(db: DbHandle, email: string, password: string): Use
   if (!verifyPassword(password, row.passwordHash)) return null;
   const { passwordHash: _omit, ...user } = row;
   return user;
+}
+
+// ── Refresh tokens (opaque, server-stored, revocable) ────────────────────────
+// Only the SHA-256 hash is persisted; the plaintext is returned to the client
+// exactly once and can be invalidated via /api/auth/logout or rotation.
+
+export interface StoredRefreshToken {
+  userId: string;
+  expiresAt: string; // ISO 8601
+  revoked: boolean;
+}
+
+export function insertRefreshToken(db: DbHandle, userId: string, rt: RefreshToken): void {
+  db.db.run(
+    `INSERT OR REPLACE INTO refresh_tokens (token_hash, user_id, expires_at, revoked, created_at)
+     VALUES (?, ?, ?, 0, ?)`,
+    [rt.hash, userId, rt.expiresAt, new Date().toISOString()],
+  );
+}
+
+export function findRefreshToken(db: DbHandle, hash: string): StoredRefreshToken | null {
+  const res = db.db.exec(
+    'SELECT user_id, expires_at, revoked FROM refresh_tokens WHERE token_hash = ?',
+    [hash],
+  )[0]?.values ?? [];
+  if (res.length === 0) return null;
+  const r = res[0];
+  return {
+    userId: String(r[0]),
+    expiresAt: String(r[1]),
+    revoked: Number(r[2]) === 1,
+  };
+}
+
+export function revokeRefreshToken(db: DbHandle, hash: string): void {
+  db.db.run('UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?', [hash]);
 }
 
 interface StoredMetric {

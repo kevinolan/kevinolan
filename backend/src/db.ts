@@ -58,6 +58,15 @@ CREATE TABLE IF NOT EXISTS metrics (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_user ON metrics(user_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON metrics(recorded_at);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  token_hash TEXT PRIMARY KEY,        -- SHA-256 of the opaque refresh token (plaintext never stored)
+  user_id TEXT NOT NULL,
+  expires_at TEXT NOT NULL,           -- ISO 8601
+  revoked INTEGER NOT NULL DEFAULT 0, -- 1 = revoked (logout / rotation)
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
 `;
 
 export interface DbHandle {
@@ -96,7 +105,7 @@ export async function openDb(dbPath: string = DB_PATH): Promise<DbHandle> {
     db,
     persist,
     clear: () => {
-      db.run('DELETE FROM metrics; DELETE FROM users;');
+      db.run('DELETE FROM metrics; DELETE FROM users; DELETE FROM refresh_tokens;');
     },
     close: () => db.close(),
   };
@@ -111,7 +120,7 @@ export async function openMemoryDb(): Promise<DbHandle> {
     db,
     persist: () => {},
     clear: () => {
-      db.run('DELETE FROM metrics; DELETE FROM users;');
+      db.run('DELETE FROM metrics; DELETE FROM users; DELETE FROM refresh_tokens;');
     },
     close: () => db.close(),
   };

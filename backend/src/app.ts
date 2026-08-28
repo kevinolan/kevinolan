@@ -14,6 +14,7 @@ import {
   IngestMetricsSchema,
   CreateUserSchema,
   LoginRequestSchema,
+  RefreshRequestSchema,
   type ApiError,
   type AuthResponse,
 } from '@fluentpath/shared';
@@ -26,8 +27,13 @@ import {
   listUsers,
   authenticate,
   summarizeUser,
+  insertRefreshToken,
+  findRefreshToken,
+  revokeRefreshToken,
 } from './repo.js';
-import { signToken, verifyToken, extractToken } from './auth.js';
+import { signToken, verifyToken, extractToken, issueRefreshToken, sha256 } from './auth.js';
+import { CORS_ORIGINS } from './config.js';
+import { createRateLimiter, type RateLimiter } from './ratelimit.js';
 
 function notFound(db: DbHandle, res: Response, id: string) {
   res.status(404).json({ error: 'user_not_found', detail: id } satisfies ApiError);
@@ -47,8 +53,27 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
 
 export function createApp(db: DbHandle): Express {
   const app = express();
-  app.use(cors()); // open CORS for the admin SPA + local dev; tighten per-env in prod
+  app.use(cors({ origin: CORS_ORIGINS, credentials: true })); // restrict cross-origin to configured admin/client origins
   app.use(express.json({ limit: '1mb' }));
+
+  // ── Auth-surface throttling (per client IP) ──────────────────────────────
+  // Applied to every /api/auth/* route before the handler runs. 429s carry a
+  // Retry-After header and a machine-readable error code.
+  const limiter: RateLimiter = createRateLimiter();
+  function applyAuthRateLimit(req: Request, res: Response, next: NextFunction): void {
+    const r = limiter.authRateLimit(req);
+    if (r.limited) {
+      res.set('Retry-After', String(r.retryAfter));
+      res.status(429).json({
+        error: 'rate_limited',
+        detail: 'too_many_auth_requests',
+        retryAfter: r.retryAfter,
+      } satisfies ApiError);
+      return;
+    }
+    next();
+  }
+  app.use('/api/auth', applyAuthRateLimit);
 
   // Health / readiness (open)
   app.get('/api/health', (_req, res) => {
@@ -61,13 +86,70 @@ export function createApp(db: DbHandle): Express {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_login', detail: parsed.error.message } satisfies ApiError);
     }
+    // Per-email lockout: block the account briefly after too many failures.
+    const lock = limiter.checkLoginLockout(parsed.data.email);
+    if (lock.locked) {
+      res.set('Retry-After', String(lock.retryAfter));
+      return res.status(429).json({
+        error: 'account_locked',
+        detail: 'too_many_failed_logins',
+        retryAfter: lock.retryAfter,
+      } satisfies ApiError);
+    }
     const user = authenticate(db, parsed.data.email, parsed.data.password);
     if (!user) {
+      limiter.recordLoginFailure(parsed.data.email);
       return res.status(401).json({ error: 'invalid_credentials' } satisfies ApiError);
     }
+    limiter.recordLoginSuccess(parsed.data.email);
     const token = signToken({ sub: user.id, role: user.role, email: user.email });
-    const body: AuthResponse = { token, user };
+    // Issue an opaque, server-stored refresh token (rotated on /api/auth/refresh).
+    const rt = issueRefreshToken();
+    insertRefreshToken(db, user.id, rt);
+    db.persist(); // write-through: never lose a refresh grant
+    const body: AuthResponse = { token, refreshToken: rt.plaintext, user };
     res.json(body);
+  });
+
+  // Refresh an access token using an opaque refresh token. Rotation: the
+  // presented refresh token is revoked and a fresh pair is minted.
+  app.post('/api/auth/refresh', (req, res) => {
+    const parsed = RefreshRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_refresh', detail: parsed.error.message } satisfies ApiError);
+    }
+    const hash = sha256(parsed.data.refreshToken);
+    const stored = findRefreshToken(db, hash);
+    if (
+      !stored ||
+      stored.revoked ||
+      new Date(stored.expiresAt).getTime() <= Date.now()
+    ) {
+      return res.status(401).json({ error: 'invalid_refresh_token' } satisfies ApiError);
+    }
+    const user = getUser(db, stored.userId);
+    if (!user) {
+      return res.status(401).json({ error: 'invalid_refresh_token' } satisfies ApiError);
+    }
+    // Rotate.
+    revokeRefreshToken(db, hash);
+    const token = signToken({ sub: user.id, role: user.role, email: user.email });
+    const rt = issueRefreshToken();
+    insertRefreshToken(db, user.id, rt);
+    db.persist();
+    const body: AuthResponse = { token, refreshToken: rt.plaintext, user };
+    res.json(body);
+  });
+
+  // Revoke a refresh token (logout). Idempotent.
+  app.post('/api/auth/logout', (req, res) => {
+    const parsed = RefreshRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_logout', detail: parsed.error.message } satisfies ApiError);
+    }
+    revokeRefreshToken(db, sha256(parsed.data.refreshToken));
+    db.persist();
+    res.status(204).end();
   });
 
   // Current clinician (open to any valid token)
