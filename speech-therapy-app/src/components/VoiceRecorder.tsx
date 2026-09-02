@@ -318,7 +318,20 @@ export default function VoiceRecorder({ onSessionComplete }: Props) {
 
             {!speech.supported && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                Live transcription isn't supported in this browser — audio recording still works.
+                {speech.error === 'insecure-context'
+                  ? 'Live transcription requires a secure (HTTPS) connection'
+                  : 'Live transcription is not supported in this browser (try Chrome, Edge, or Safari)'}
+                {' '}— audio recording still works.
+              </p>
+            )}
+
+            {speech.supported && speech.error && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--danger)', textAlign: 'center' }}>
+                {speech.error === 'not-allowed'
+                  ? 'Microphone access for transcription was denied — audio recording still works.'
+                  : speech.error === 'network'
+                  ? 'Live transcription lost its network connection and stopped.'
+                  : 'Live transcription is unavailable right now — audio recording still works.'}
               </p>
             )}
 
