@@ -16,7 +16,7 @@ const CLIENT_ID_KEY = 'fluentpath_client_id';
 export interface Identity {
   /** Stable UUID — used as `userId` in IngestMetrics payloads. */
   clientId: string;
-  /** `${Platform.OS}-${clientId}` — helps the clinician tell clients apart. */
+  /** `${Platform.OS}-${clientId}-1` — helps the clinician tell clients apart. */
   deviceId: string;
 }
 
@@ -44,7 +44,7 @@ export async function getIdentity(): Promise<Identity> {
   const clientId = uuid();
   const identity: Identity = {
     clientId,
-    deviceId: `${Platform.OS}-${clientId}`,
+    deviceId: `${Platform.OS}-${clientId}-1`,
   };
   await AsyncStorage.setItem(CLIENT_ID_KEY, JSON.stringify(identity));
   return identity;

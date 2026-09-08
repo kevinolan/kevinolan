@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Alert, Text, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
+import Slider from '@react-native-community/slider';
 import * as FileSystem from 'expo-file-system';
 import Animated, {
   useSharedValue,
@@ -29,15 +30,22 @@ export default function TrainScreen() {
     wordCount: number;
     ratePerMin: number;
     disfluencies: number;
+    durationSec: number;
+    easeRating: number;
     fluencySummary: string | null;
   } | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline'>('idle');
+  const [easeRating, setEaseRating] = useState(50);
 
   const scale = useSharedValue(1);
 
   // Flush pending metrics on mount + app focus
   useEffect(() => {
-    flushQueue();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void flushQueue();
+    });
+    void flushQueue();
+    return () => subscription.remove();
   }, []);
 
   async function startRecording() {
@@ -86,11 +94,15 @@ export default function TrainScreen() {
 
     setIsProcessing(true);
     try {
+      const status = await recording.getStatusAsync();
+      const durationSec = status.isLoaded ? Math.round(status.durationMillis / 1000) : 0;
       await recording.stopAndUnloadAsync();
 
       const identity = await getIdentity();
       const analysis = await analyzeRecording({
         recordingUri: uri,
+        durationSec,
+        easeRating,
         // Phase 2+: auto-transcribe via on-device STT here.
       });
 
@@ -103,6 +115,8 @@ export default function TrainScreen() {
         wordCount: analysis.metric.heuristic.wordCount,
         ratePerMin: analysis.metric.heuristic.ratePerMin,
         disfluencies: analysis.metric.heuristic.disfluencies,
+        durationSec: analysis.metric.durationSec,
+        easeRating,
         fluencySummary: analysis.fluencySummary,
       });
 
@@ -251,6 +265,25 @@ export default function TrainScreen() {
               {renderMetric('Repetitions', results.repetitions)}
               {renderMetric('Prolongations', results.prolongations)}
               {renderMetric('Blocks', results.blocks)}
+            </View>
+
+            <View style={styles.easeCard}>
+              <View style={styles.easeHeader}>
+                <ThemedText style={styles.easeLabel}>Communication ease</ThemedText>
+                <ThemedText style={styles.easeValue}>{easeRating}/100</ThemedText>
+              </View>
+              <Slider
+                style={styles.easeSlider}
+                minimumValue={0}
+                maximumValue={100}
+                step={1}
+                value={easeRating}
+                onValueChange={setEaseRating}
+                minimumTrackTintColor="#10B981"
+                maximumTrackTintColor="#CBD5E1"
+                thumbTintColor="#10B981"
+              />
+              <ThemedText style={styles.easeHint}>Your own sense of confidence while speaking</ThemedText>
             </View>
 
             <View style={styles.metricRow}>
@@ -409,6 +442,34 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderLeftWidth: 4,
     borderLeftColor: '#10B981',
+  },
+  easeCard: {
+    width: '100%',
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#ECFDF5',
+  },
+  easeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  easeLabel: {
+    color: '#065F46',
+    fontWeight: '600',
+  },
+  easeValue: {
+    color: '#047857',
+    fontWeight: '700',
+  },
+  easeSlider: {
+    width: '100%',
+    height: 36,
+  },
+  easeHint: {
+    color: '#047857',
+    fontSize: 12,
   },
   summaryText: {
     color: '#14532D',

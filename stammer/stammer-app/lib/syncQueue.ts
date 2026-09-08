@@ -41,6 +41,7 @@ async function saveQueue(items: QueuedItem[]): Promise<void> {
 export async function enqueueMetrics(payload: IngestMetrics): Promise<void> {
   const items = await loadQueue();
   const key = `${payload.deviceId}/${payload.metrics[0]?.id ?? 'batch'}`;
+  if (items.some((item) => item.key === key)) return;
   items.push({ key, payload, enqueuedAt: Date.now(), attempts: 0 });
   await saveQueue(items);
 }

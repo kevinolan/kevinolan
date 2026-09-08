@@ -11,6 +11,7 @@ const config = getDefaultConfig(__dirname);
 
 // Allow importing from the shared package's TS source directly.
 config.resolver.sourceExts = [...config.resolver.sourceExts, 'cjs', 'mjs'];
+config.resolver.assetExts = [...config.resolver.assetExts, 'onnx'];
 config.resolver.extraNodeModules = {
   '@fluentpath/shared': require.resolve('@fluentpath/shared'),
 };

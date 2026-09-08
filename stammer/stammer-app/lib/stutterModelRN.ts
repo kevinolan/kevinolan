@@ -16,7 +16,7 @@ import { InferenceSession, Tensor } from 'onnxruntime-react-native';
 // On RN, the model asset is placed in the app bundle via `require`. We resolve
 // it lazily so a failed bundle inclusion doesn't crash import time.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const MODEL_URI = require('../assets/models/cnn_stutter_pcm.onnx');
+const MODEL_URI = require('../src/assets/models/cnn_stutter_pcm.onnx');
 
 let session: InferenceSession | null = null;
 
@@ -64,6 +64,8 @@ function resample16k(x: Float32Array, from: number): Float32Array {
   }
   return out;
 }
+
+export { resample16k };
 
 /**
  * Whether the model asset is present in the bundle. We probe the session

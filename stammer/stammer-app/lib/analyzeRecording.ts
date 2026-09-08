@@ -34,6 +34,8 @@ export interface AnalysisResult {
 export interface AnalysisInput {
   /** URI of the recorded audio file (file://...). */
   recordingUri: string;
+  /** Duration from the recorder, used when compressed audio cannot be decoded to PCM. */
+  durationSec?: number;
   /** Optional transcript (from on-device STT in Phase 2, or typed by the user). */
   transcript?: string;
   /** Optional self-reported communication-ease rating 0–100. */
@@ -49,7 +51,6 @@ async function loadMonoFloat(uri: string): Promise<{ pcm: Float32Array; sr: numb
     { shouldPlay: false, volume: 0 },
   );
   // We can't access raw PCM from expo-av easily, so use the file's metadata.
-  const info = await FileSystem.getInfoAsync(uri);
   // Fallback: decode via a minimal WAV reader if the file is WAV; for AAC/M4A
   // we rely on the system decoder through expo-av and accept the recorded rate.
   await sound.unloadAsync();
@@ -60,11 +61,10 @@ async function loadMonoFloat(uri: string): Promise<{ pcm: Float32Array; sr: numb
     return { pcm: pcm.data, sr: pcm.sampleRate };
   }
 
-  // For non-WAV (M4A/AAC from expo-av), use the known default sample rate.
-  // expo-av HIGH_QUALITY preset records at 44100 Hz.
-  // We approximate: load raw bytes — this is a simplification for Phase 1.
-  const bytes = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  return { pcm: new Float32Array(0), sr: 44100 };
+    // expo-av's default M4A/AAC recording needs a native decoder before it can
+    // be passed to the raw-PCM ONNX model. Keep the heuristic/duration path
+    // usable and let callers fall back to pStutter=null until one is installed.
+  throw new Error('PCM extraction is only supported for WAV recordings');
 }
 
 interface WavResult {
@@ -89,22 +89,24 @@ function readWav(uri: string): Promise<WavResult> {
         ((header.charCodeAt(27) & 0xff) << 24);
       const bitsPerSample =
         (header.charCodeAt(34) & 0xff) | ((header.charCodeAt(35) & 0xff) << 8);
+      const channels =
+        (header.charCodeAt(22) & 0xff) | ((header.charCodeAt(23) & 0xff) << 8);
       const dataSize =
-        (header.charCodeAt(42) & 0xff) |
-        ((header.charCodeAt(43) & 0xff) << 8) |
-        ((header.charCodeAt(44) & 0xff) << 16) |
-        ((header.charCodeAt(45) & 0xff) << 24);
+        (header.charCodeAt(40) & 0xff) |
+        ((header.charCodeAt(41) & 0xff) << 8) |
+        ((header.charCodeAt(42) & 0xff) << 16) |
+        ((header.charCodeAt(43) & 0xff) << 24);
 
       const samples: number[] = [];
       const offset = 44;
-      for (let i = 0; i < dataSize && offset + i * 2 + 1 < binary.length; i += 2) {
+      const bytesPerFrame = Math.max(2, channels * (bitsPerSample / 8));
+      for (let i = 0; i < dataSize && offset + i + 1 < binary.length; i += bytesPerFrame) {
         const lo = binary.charCodeAt(offset + i) & 0xff;
         const hi = binary.charCodeAt(offset + i + 1) & 0xff;
         const sample = (hi << 8) | lo;
         // Sign-extend 16-bit
         const signed = sample >= 0x8000 ? sample - 0x10000 : sample;
         samples.push(signed / 32768); // normalize to [-1, 1]
-        i++; // skip the byte we manually consumed
       }
 
       // Take left channel only (mono assumption; for stereo this is L).
@@ -148,11 +150,10 @@ export async function analyzeRecording(
   }
 
   // Heuristic analysis (if we have a transcript)
+  const durationSec = input.durationSec ?? (pcm.length > 0 ? pcm.length / sr : 0);
   const report = input.transcript
-    ? analyzeFluency(input.transcript, 0) // durationSec could be added
-    : { repetitions: 0, prolongations: 0, blocks: 0, wordCount: 0, ratePerMin: 0 };
-
-  const durationSec = pcm.length > 0 ? pcm.length / sr : 0;
+    ? analyzeFluency(input.transcript, durationSec)
+    : { repetitions: 0, prolongations: 0, blocks: 0, wordCount: 0, ratePerMin: 0, disfluencies: 0 };
 
   const metric: RecordingMetric = {
     id: `${clientId}-${Date.now()}`,
@@ -165,7 +166,7 @@ export async function analyzeRecording(
       blocks: report.blocks,
       wordCount: report.wordCount,
       ratePerMin: report.ratePerMin,
-      disfluencies: report.repetitions + report.prolongations + report.blocks,
+      disfluencies: report.disfluencies,
     },
   };
 
@@ -173,7 +174,7 @@ export async function analyzeRecording(
     metric,
     usedModel,
     fluencySummary: input.transcript ? report.summary : null,
-    easeRating: input.easeRating ?? null,
+      easeRating: input.easeRating ?? null,
   };
 }
 
