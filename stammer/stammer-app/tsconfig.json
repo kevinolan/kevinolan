@@ -3,10 +3,11 @@
   "compilerOptions": {
     "strict": true,
     "ignoreDeprecations": "6.0",
+    "moduleResolution": "bundler",
+    "types": ["node"],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "@/lib/*": ["./src/lib/*"]
     }
   },
   "include": [

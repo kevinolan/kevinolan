@@ -1,42 +1,65 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, Text, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
-import Animated, { 
-  useSharedValue, 
-  useAnimatedStyle, 
-  withTiming, 
-  withRepeat, 
+import * as FileSystem from 'expo-file-system';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
   withSequence,
-  Easing
 } from 'react-native-reanimated';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { getIdentity } from '@/lib/identity';
+import { analyzeRecording, buildIngestPayload } from '@/lib/analyzeRecording';
+import { enqueueMetrics, flushQueue } from '@/lib/syncQueue';
 
 export default function TrainScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [results, setResults] = useState<{ fluency: number; pacing: number } | null>(null);
+  const [results, setResults] = useState<{
+    pStutter: number | null;
+    usedModel: boolean;
+    repetitions: number;
+    prolongations: number;
+    blocks: number;
+    wordCount: number;
+    ratePerMin: number;
+    disfluencies: number;
+    fluencySummary: string | null;
+  } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'offline'>('idle');
 
   const scale = useSharedValue(1);
+
+  // Flush pending metrics on mount + app focus
+  useEffect(() => {
+    flushQueue();
+  }, []);
 
   async function startRecording() {
     try {
       const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') return;
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant microphone access to record.');
+        return;
+      }
 
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
 
-      const { recording } = await Audio.Recording.createAsync(
+      const { recording: rec } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
-      setRecording(recording);
+      setRecording(rec);
       setIsRecording(true);
       setResults(null);
+      setSyncStatus('idle');
 
       scale.value = withRepeat(
         withSequence(
@@ -48,6 +71,7 @@ export default function TrainScreen() {
       );
     } catch (err) {
       console.error('Failed to start recording', err);
+      Alert.alert('Error', 'Could not start recording.');
     }
   }
 
@@ -56,26 +80,77 @@ export default function TrainScreen() {
     setRecording(null);
     scale.value = withTiming(1);
 
-    if (recording) {
+    if (!recording) return;
+    const uri = recording.getURI();
+    if (!uri) return;
+
+    setIsProcessing(true);
+    try {
       await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      console.log('Recording stopped and stored at', uri);
-      
-      // Simulate training the model/analysis
-      setIsProcessing(true);
-      setTimeout(() => {
-        setIsProcessing(false);
-        setResults({
-          fluency: Math.floor(Math.random() * 30) + 70,
-          pacing: Math.floor(Math.random() * 20) + 80,
-        });
-      }, 2000);
+
+      const identity = await getIdentity();
+      const analysis = await analyzeRecording({
+        recordingUri: uri,
+        // Phase 2+: auto-transcribe via on-device STT here.
+      });
+
+      setResults({
+        pStutter: analysis.metric.pStutter,
+        usedModel: analysis.usedModel,
+        repetitions: analysis.metric.heuristic.repetitions,
+        prolongations: analysis.metric.heuristic.prolongations,
+        blocks: analysis.metric.heuristic.blocks,
+        wordCount: analysis.metric.heuristic.wordCount,
+        ratePerMin: analysis.metric.heuristic.ratePerMin,
+        disfluencies: analysis.metric.heuristic.disfluencies,
+        fluencySummary: analysis.fluencySummary,
+      });
+
+      // Build + enqueue the payload. If backend is reachable it posts
+      // immediately via flush; if not, it's queued for later.
+      const payload = buildIngestPayload(analysis, identity);
+      try {
+        await enqueueMetrics(payload);
+        setSyncStatus('syncing');
+        const result = await flushQueue();
+        if (result.posted > 0) {
+          setSyncStatus('synced');
+        } else if (result.errors.includes('backend_unreachable')) {
+          setSyncStatus('offline');
+        }
+      } catch (e) {
+        setSyncStatus('offline');
+      }
+
+      // Clean up the temp file
+      try {
+        await FileSystem.deleteAsync(uri, { idempotent: true });
+      } catch {}
+    } catch (err) {
+      console.error('Analysis failed', err);
+      Alert.alert('Error', 'Could not process the recording.');
+    } finally {
+      setIsProcessing(false);
     }
+  }
+
+  function reset() {
+    setResults(null);
+    setSyncStatus('idle');
   }
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
+
+  function renderMetric(label: string, value: number | string, accent = '#4F46E5') {
+    return (
+      <View style={styles.metric}>
+        <Text style={styles.metricLabel}>{label}</Text>
+        <Text style={[styles.metricValue, { color: accent }]}>{value}</Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -87,15 +162,21 @@ export default function TrainScreen() {
       <View style={styles.content}>
         {!results && !isProcessing && (
           <View style={styles.recordContainer}>
-            <Animated.View style={[styles.pulseCircle, animatedStyle, isRecording && styles.recordingActive]} />
-            <TouchableOpacity 
-              style={[styles.recordButton, isRecording && styles.buttonActive]} 
+            <Animated.View
+              style={[
+                styles.pulseCircle,
+                animatedStyle,
+                isRecording && styles.recordingActive,
+              ]}
+            />
+            <TouchableOpacity
+              style={[styles.recordButton, isRecording && styles.buttonActive]}
               onPress={isRecording ? stopRecording : startRecording}
             >
-              <IconSymbol 
-                name={isRecording ? 'square.fill' : 'waveform'} 
-                size={40} 
-                color="#FFF" 
+              <IconSymbol
+                name={isRecording ? 'square.fill' : 'waveform'}
+                size={40}
+                color="#FFF"
               />
             </TouchableOpacity>
             <ThemedText style={styles.instruction}>
@@ -107,27 +188,93 @@ export default function TrainScreen() {
         {isProcessing && (
           <View style={styles.processingContainer}>
             <IconSymbol name="timer" size={60} color="#4F46E5" />
-            <ThemedText type="subtitle" style={styles.processingText}>Processing voice data...</ThemedText>
+            <ThemedText type="subtitle" style={styles.processingText}>
+              Analyzing your speech…
+            </ThemedText>
           </View>
         )}
 
         {results && (
           <View style={styles.resultsContainer}>
-            <ThemedText type="subtitle" style={styles.resultsTitle}>Analysis Complete</ThemedText>
-            
-            <View style={styles.metricRow}>
-              <View style={styles.metric}>
-                <ThemedText style={styles.metricLabel}>Fluency</ThemedText>
-                <ThemedText type="title" style={styles.metricValue}>{results.fluency}%</ThemedText>
-              </View>
-              <View style={styles.metric}>
-                <ThemedText style={styles.metricLabel}>Pacing</ThemedText>
-                <ThemedText type="title" style={styles.metricValue}>{results.pacing}%</ThemedText>
-              </View>
+            <ThemedText type="subtitle" style={styles.resultsTitle}>
+              Analysis Complete
+            </ThemedText>
+
+            {/* Sync status indicator */}
+            <View style={styles.syncRow}>
+              <IconSymbol
+                name={
+                  syncStatus === 'synced'
+                    ? 'checkmark.circle.fill'
+                    : syncStatus === 'offline'
+                    ? 'exclamationmark.triangle.fill'
+                    : syncStatus === 'syncing'
+                    ? 'arrow.clockwise'
+                    : 'circle'
+                }
+                size={20}
+                color={
+                  syncStatus === 'synced'
+                    ? '#10B981'
+                    : syncStatus === 'offline'
+                    ? '#F59E0B'
+                    : '#94A3B8'
+                }
+              />
+              <ThemedText style={styles.syncText}>
+                {syncStatus === 'synced'
+                  ? 'Synced to your clinician dashboard'
+                  : syncStatus === 'offline'
+                  ? 'Will sync when online'
+                  : syncStatus === 'syncing'
+                  ? 'Syncing…'
+                  : 'Recorded'}
+              </ThemedText>
             </View>
 
-            <TouchableOpacity style={styles.retryButton} onPress={() => setResults(null)}>
-              <ThemedText style={styles.retryText}>Train Again</ThemedText>
+            {/* ONNX model status badge */}
+            <View style={styles.modelBadge}>
+              <ThemedText style={styles.modelBadgeText}>
+                {results.usedModel ? 'ONNX model active' : 'Heuristic mode (model unavailable)'}
+              </ThemedText>
+            </View>
+
+            {/* Core stats grid */}
+            <View style={styles.metricRow}>
+              {renderMetric(
+                'P(stutter)',
+                results.pStutter === null
+                  ? '—'
+                  : `${Math.round(results.pStutter * 100)}%`,
+                results.pStutter === null ? '#94A3B8' : '#EF4444',
+              )}
+              {renderMetric('Repetitions', results.repetitions)}
+              {renderMetric('Prolongations', results.prolongations)}
+              {renderMetric('Blocks', results.blocks)}
+            </View>
+
+            <View style={styles.metricRow}>
+              {renderMetric('Words', results.wordCount)}
+              {renderMetric('Rate/min', results.ratePerMin)}
+              {renderMetric('Disfluencies', results.disfluencies)}
+            </View>
+
+            {/* Encouraging, non-judgmental summary (ASHA-aligned) */}
+            {results.fluencySummary ? (
+              <View style={styles.summaryCard}>
+                <ThemedText style={styles.summaryText}>{results.fluencySummary}</ThemedText>
+              </View>
+            ) : (
+              <View style={styles.summaryCard}>
+                <ThemedText style={styles.summaryText}>
+                  Recording saved. The on-device model analyzed your speech patterns.
+                  Share this with your clinician for context.
+                </ThemedText>
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.retryButton} onPress={reset}>
+              <ThemedText style={styles.retryText}>Record Again</ThemedText>
             </TouchableOpacity>
           </View>
         )}
@@ -213,14 +360,35 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   resultsTitle: {
-    marginBottom: 24,
+    marginBottom: 16,
     color: '#1E293B',
+  },
+  syncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 16,
+  },
+  syncText: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  modelBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  modelBadgeText: {
+    fontSize: 12,
+    color: '#475569',
   },
   metricRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     width: '100%',
-    marginBottom: 32,
+    marginBottom: 12,
   },
   metric: {
     alignItems: 'center',
@@ -228,15 +396,31 @@ const styles = StyleSheet.create({
   metricLabel: {
     color: '#64748B',
     marginBottom: 4,
+    fontSize: 13,
   },
   metricValue: {
-    color: '#4F46E5',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  summaryCard: {
+    backgroundColor: '#F0FDF4',
+    padding: 16,
+    borderRadius: 16,
+    marginTop: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#10B981',
+  },
+  summaryText: {
+    color: '#14532D',
+    fontSize: 14,
+    lineHeight: 20,
   },
   retryButton: {
     backgroundColor: '#F1F5F9',
     paddingVertical: 12,
     paddingHorizontal: 32,
     borderRadius: 12,
+    marginTop: 16,
   },
   retryText: {
     color: '#4F46E5',
