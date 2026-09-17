@@ -84,23 +84,26 @@ def main():
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--resume", type=str, default=None)
+    ap.add_argument("--data_root", type=str, default=DATA_DIR,
+                    help="dataset root containing train/val/test metadata.csv")
     ap.add_argument("--no-synth", action="store_true", help="skip dataset generation")
     args = ap.parse_args()
 
     os.makedirs(CKPT_DIR, exist_ok=True)
     is_raw = args.model == "wav2vec2"
+    data_dir = os.path.abspath(args.data_root)
 
     # Ensure a dataset exists.
-    meta = os.path.join(DATA_DIR, "train", "metadata.csv")
-    if not os.path.exists(meta) and not args.no_synth:
+    meta = os.path.join(data_dir, "train", "metadata.csv")
+    if not os.path.exists(meta) and data_dir == os.path.abspath(DATA_DIR) and not args.no_synth:
         print("Synthetic dataset missing — generating now...")
         import generate_data
         generate_data.main()
 
     if is_raw:
-        train_loader, val_loader = get_raw_loaders(DATA_DIR, batch_size=args.batch_size)
+        train_loader, val_loader = get_raw_loaders(data_dir, batch_size=args.batch_size)
     else:
-        train_loader, val_loader, _ = get_loaders(DATA_DIR, batch_size=args.batch_size)
+        train_loader, val_loader, _ = get_loaders(data_dir, batch_size=args.batch_size)
 
     model = build_model(args.model).to(DEVICE)
     if args.resume and os.path.exists(args.resume):

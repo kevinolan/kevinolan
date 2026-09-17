@@ -25,6 +25,7 @@ Usage:
 import argparse
 import csv
 import os
+import random
 import sys
 
 import numpy as np
@@ -90,6 +91,29 @@ def write_metadata(rows, out_root: str) -> str:
     n_fluent = sum(1 for _, l in rows if l == 0)
     n_stut = sum(1 for _, l in rows if l == 1)
     print(f"Wrote {meta}: {len(rows)} clips ({n_fluent} fluent, {n_stut} stutter)")
+
+    # Keep every split class-balanced so the trainer can consume this output
+    # directly without requiring the corpus provider to define splits.
+    rng = random.Random(42)
+    by_label = {0: [], 1: []}
+    for row in rows:
+        by_label[row[1]].append(row)
+    split_rows = {"train": [], "val": [], "test": []}
+    for label_rows in by_label.values():
+        rng.shuffle(label_rows)
+        n = len(label_rows)
+        boundaries = (int(n * 0.8), int(n * 0.9))
+        split_rows["train"].extend(label_rows[:boundaries[0]])
+        split_rows["val"].extend(label_rows[boundaries[0]:boundaries[1]])
+        split_rows["test"].extend(label_rows[boundaries[1]:])
+    for split, split_values in split_rows.items():
+        split_meta = os.path.join(out_root, split, "metadata.csv")
+        os.makedirs(os.path.dirname(split_meta), exist_ok=True)
+        with open(split_meta, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["file", "label"])
+            w.writerows(split_values)
+        print(f"  {split}: {len(split_values)} clips")
     return meta
 
 

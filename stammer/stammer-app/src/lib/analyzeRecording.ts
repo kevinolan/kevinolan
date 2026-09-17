@@ -34,6 +34,8 @@ export interface AnalysisResult {
 export interface AnalysisInput {
   /** URI of the recorded audio file (file://...). */
   recordingUri: string;
+  /** Duration from the recorder, used when compressed audio cannot be decoded. */
+  durationSec?: number;
   /** Optional transcript (from on-device STT in Phase 2, or typed by the user). */
   transcript?: string;
   /** Optional self-reported communication-ease rating 0–100. */
@@ -181,7 +183,7 @@ export async function analyzeRecording(
     ? analyzeFluency(input.transcript, 0) // durationSec could be added
     : EMPTY_REPORT;
 
-  const durationSec = pcm.length > 0 ? pcm.length / sr : 0;
+  const durationSec = input.durationSec ?? (pcm.length > 0 ? pcm.length / sr : 0);
 
   const metric: RecordingMetric = {
     id: `${clientId}-${Date.now()}`,
@@ -212,7 +214,7 @@ export function buildIngestPayload(
   identity: Awaited<ReturnType<typeof getIdentity>>,
 ): IngestMetrics {
   return {
-    userId: identity.clientId,
+    userId: identity.userId,
     deviceId: identity.deviceId,
     metrics: [result.metric],
   };

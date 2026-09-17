@@ -5,7 +5,7 @@ This folder trains and fine-tunes a stutter-speech classifier using **librosa**
 provided:
 
 | Model | Input | Notes |
-|-------|-------|-------|
+| --- | --- | --- |
 | `cnn` (default) | librosa log-Mel (3 × 64 × 128, with delta/delta²) | Fast baseline, CPU-friendly |
 | `wav2vec2` | raw 16 kHz waveform | Fine-tunes `torchaudio` Wav2Vec2 base |
 
@@ -21,10 +21,7 @@ provided:
 cd stammer
 uv venv .venv
 uv pip install --python .venv -r training/requirements.txt
-<<<<<<< Updated upstream
-=======
 uv pip install --python .venv onnx onnxruntime onnxscript   # for ONNX export
->>>>>>> Stashed changes
 ```
 
 ## Run
@@ -49,8 +46,6 @@ uv pip install --python .venv onnx onnxruntime onnxscript   # for ONNX export
 .venv/Scripts/python.exe training/infer.py training/checkpoints/cnn_best.pt path/to/audio.wav
 ```
 
-<<<<<<< Updated upstream
-=======
 ## Export to ONNX (for the web app)
 
 `export_onnx_featured.py` builds a single ONNX graph that takes **raw 16 kHz mono
@@ -71,18 +66,21 @@ The React app (`speech-therapy-app`) loads `cnn_stutter_pcm.onnx` via
    `download_uclass.py`). Lay it out as `fluent/` + `stutter/` (or a `labels.csv`
    with `path,label`).
 2. Resample + emit the metadata the trainer expects:
+
    ```bash
    .venv/Scripts/python.exe training/prepare_real_corpus.py \
        --in_root /path/to/corpus --out_root training/data/real
    ```
+
 3. Train on the real data (more epochs / larger batch — needs a real corpus + ideally GPU):
+
    ```bash
    .venv/Scripts/python.exe training/train.py --data_root training/data/real \
        --model cnn --epochs 40 --batch-size 32
    ```
+
 4. Re-export to ONNX and copy into the app.
 
->>>>>>> Stashed changes
 ## Files
 
 - `generate_data.py` — synthetic dataset generator (librosa-free; uses `soundfile`)
@@ -91,13 +89,10 @@ The React app (`speech-therapy-app`) loads `cnn_stutter_pcm.onnx` via
 - `train.py` — training / fine-tuning driver (BCE loss, AdamW, best-checkpoint saving)
 - `infer.py` — load a checkpoint and score one audio file
 - `smoke_test.py` — pipeline self-check
-<<<<<<< Updated upstream
-=======
 - `export_onnx_featured.py` — export the CNN + librosa frontend to ONNX (raw PCM in)
 - `prepare_real_corpus.py` — resample a real corpus to the trainer's `file,label` format
 - `download_uclass.py` — UCLASS data-request + prep scaffold (no auto-download; license-gated)
 - `dump_reference.py` / `dump_melfb.py` — parity/debug helpers
->>>>>>> Stashed changes
 
 ## Notes
 

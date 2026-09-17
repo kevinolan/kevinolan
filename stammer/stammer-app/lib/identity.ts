@@ -10,12 +10,15 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { registerClient } from './backend';
 
 const CLIENT_ID_KEY = 'fluentpath_client_id';
 
 export interface Identity {
-  /** Stable UUID — used as `userId` in IngestMetrics payloads. */
+  /** Stable local UUID used to derive the registration email and device id. */
   clientId: string;
+  /** Backend user id. Falls back to clientId until registration succeeds. */
+  userId: string;
   /** `${Platform.OS}-${clientId}-1` — helps the clinician tell clients apart. */
   deviceId: string;
 }
@@ -39,14 +42,40 @@ export async function getIdentity(): Promise<Identity> {
   const stored = await AsyncStorage.getItem(CLIENT_ID_KEY);
   if (stored) {
     const parsed = JSON.parse(stored) as Identity;
-    if (parsed.clientId && parsed.deviceId) return parsed;
+    if (parsed.clientId && parsed.deviceId) {
+      if (!parsed.userId) parsed.userId = parsed.clientId;
+      if (parsed.userId === parsed.clientId) {
+        try {
+          const user = await registerClient({
+            email: `${parsed.clientId}@users.speechpal.local`,
+            displayName: 'SpeechPal User',
+          });
+          parsed.userId = user.id;
+          await AsyncStorage.setItem(CLIENT_ID_KEY, JSON.stringify(parsed));
+        } catch {
+          // The sync queue will retry registration when the backend is reachable.
+        }
+      }
+      return parsed;
+    }
   }
   const clientId = uuid();
   const identity: Identity = {
     clientId,
+    userId: clientId,
     deviceId: `${Platform.OS}-${clientId}-1`,
   };
   await AsyncStorage.setItem(CLIENT_ID_KEY, JSON.stringify(identity));
+  try {
+    const user = await registerClient({
+      email: `${clientId}@users.speechpal.local`,
+      displayName: 'SpeechPal User',
+    });
+    identity.userId = user.id;
+    await AsyncStorage.setItem(CLIENT_ID_KEY, JSON.stringify(identity));
+  } catch {
+    // Keep the local identity usable offline; registration is retried on sync.
+  }
   return identity;
 }
 

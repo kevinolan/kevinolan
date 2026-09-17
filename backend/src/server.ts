@@ -1,14 +1,9 @@
 /**
  * Server entrypoint. Opens the persisted DB, builds the app, listens on PORT.
  *
- * Durability model: every mutating request persists immediately (write-through)
- * in app.ts, so we never rely on a timer. The only flush on shutdown is a
- * belt-and-braces persist() before close().
- *
- * NOTE: sql.js keeps the whole DB in memory and writes the file on export(). It
- * is safe for a SINGLE process. Running two instances against the same file is
- * unsafe (each has an independent in-memory copy) — for multi-process / production
- * use better-sqlite3 (with file locking) or a server database (Postgres). See README.
+ * Durability model: better-sqlite3 commits each mutating request immediately
+ * using SQLite WAL mode and full synchronous writes. The persist() call remains
+ * as a compatibility no-op before clean shutdown.
  */
 import { openDb } from './db.js';
 import { createApp } from './app.js';

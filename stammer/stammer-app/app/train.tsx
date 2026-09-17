@@ -95,7 +95,7 @@ export default function TrainScreen() {
     setIsProcessing(true);
     try {
       const status = await recording.getStatusAsync();
-      const durationSec = status.isLoaded ? Math.round(status.durationMillis / 1000) : 0;
+      const durationSec = Math.round(status.durationMillis / 1000);
       await recording.stopAndUnloadAsync();
 
       const identity = await getIdentity();

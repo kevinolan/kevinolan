@@ -255,6 +255,16 @@ describe('backend API (in-memory DB)', () => {
     expect(over.headers['retry-after']).toBeDefined();
   });
 
+  test('rate limiting ignores spoofed forwarded IPs by default', async () => {
+    for (let i = 0; i < 21; i++) {
+      const r = await request(app)
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', `198.51.100.${i + 1}`)
+        .send({ email: `spoof${i}@x.com`, password: 'wrong' });
+      expect(r.status).toBe(i < 20 ? 401 : 429);
+    }
+  });
+
   test('db.clear() also drops refresh tokens so a stale grant cannot be replayed', async () => {
     const u = createUser(db, { email: 'rt@x.com', displayName: 'RT', role: 'clinician', password: 'password123' });
     const rt = issueRefreshToken();

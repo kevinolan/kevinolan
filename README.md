@@ -6,7 +6,7 @@ contract (`shared/`) and one on-device stutter model (`cnn_stutter_pcm.onnx`).
 | Package | Stack | Purpose |
 | --- | --- | --- |
 | `shared/` | TypeScript + zod (dependency-free) | Domain types + validation schemas — the API contract consumed by every tier. |
-| `backend/` | Node.js + Express + TypeScript (tsx) + **sql.js** (WASM SQLite) | Metrics ingestion + user store + REST API + minimal JWT auth. |
+| `backend/` | Node.js + Express + TypeScript (tsx) + **better-sqlite3** | Metrics ingestion + user store + REST API + minimal JWT auth. |
 | `web-admin/` | Next.js (App Router) | Clinician dashboard — login + patient list with aggregated fluency stats. |
 | `speech-therapy-app/` | React 19 + Vite PWA | Desktop client — records audio, runs the stutter model **on-device** (ONNX), shows coaching + progress. |
 | `stammer/training/` | Python (librosa + torchaudio) | Trains/fine-tunes the stutter detector and exports it to ONNX for in-browser inference. |
@@ -30,7 +30,7 @@ contract (`shared/`) and one on-device stutter model (`cnn_stutter_pcm.onnx`).
                                              ▼
  mobile (RN / SpeechPal)  ──┐        speech-therapy-app/  (PWA)  loads
  (standalone today)         │        /models/cnn_stutter_pcm.onnx, runs it
-                            ├─▶ POST /api/metrics ─▶ backend ─▶ SQLite (sql.js)
+                            ├─▶ POST /api/metrics ─▶ backend ─▶ SQLite (better-sqlite3)
  desktop PWA ───────────────┘        GET  /api/users/:id/metrics
                                               │
                                           web-admin (Next.js) reads
@@ -97,8 +97,7 @@ The admin keeps the access + refresh tokens in `sessionStorage`; the API client
 revokes the refresh grant on logout, so clinicians stay signed in across the 15-min
 access-token window without re-entering credentials.
 ```
-The backend **auto-seeds a default clinician on startup** (via `repo.ensureSeeded`,
-using the server's own connection — required because sql.js is single-process).
+The backend **auto-seeds a default clinician on startup** (via `repo.ensureSeeded`).
 Default credentials unless overridden by env:
 `clinician@fluentpath.dev` / `fluentpath-dev-1234`. Override with
 `CLINICIAN_EMAIL` / `CLINICIAN_PASSWORD` / `CLINICIAN_NAME` (set `JWT_SECRET` in
@@ -106,16 +105,13 @@ prod). The `npm run seed:clinician` script is an offline alternative for seeding
 DB file that no running server holds.
 
 ### Data layer
-- **sql.js (pure-WASM SQLite)** — chosen because this environment has no reliable
-  native build toolchain. The DB module (`backend/src/db.ts`) is the *only* place
-  that touches the driver, so swapping to `better-sqlite3` for production needs no
-  changes elsewhere.
-- **Durability:** every mutating request persists immediately (write-through), so
-  a crash between requests loses at most the in-flight one. On SIGINT/SIGTERM the
-  server flushes once and closes cleanly.
-- **⚠️ Single-process only.** sql.js holds the whole DB in memory; two processes
-  opening the same file will have independent copies and the last writer wins. For
-  multi-instance / production, use `better-sqlite3` (file locking) or a server DB.
+- **better-sqlite3** uses SQLite's native file locking and prepared statements.
+- **Durability:** WAL mode, foreign-key enforcement, a 5-second busy timeout, and
+  `synchronous=FULL` are configured at startup. Every mutating request commits
+  immediately; no export or shutdown flush is required.
+- **Deployment:** keep `data/fluentpath.db`, `data/fluentpath.db-wal`, and
+  `data/fluentpath.db-shm` on persistent local storage. For multiple application
+  instances, move this data layer to a managed server database such as Postgres.
 
 ## Model training (`stammer/training/`)
 
@@ -219,9 +215,10 @@ Integrating it into the shared platform (consume the model, post metrics via the
   contract. The app exists; the wiring is the remaining work.
 - **Train on a real corpus** — the committed model is from the synthetic dataset;
   swap in UCLASS/FluencyBank/KCL and retrain for real-world accuracy.
-- **Production hardening (remaining):** rate limiting on auth endpoints, and a
-  production-grade DB (`better-sqlite3` / Postgres) — sql.js is single-process.
-  Refresh tokens + fail-closed secret/CORS boot checks are done.
+- **Production hardening (remaining):** move to a managed server database such as
+  Postgres if deploying multiple backend instances. Refresh tokens, auth rate
+  limiting, better-sqlite3 durability, and fail-closed secret/CORS boot checks are
+  done.
 
 ## Known issues (as of this revision)
 - **Unresolved merge-conflict markers are committed** in

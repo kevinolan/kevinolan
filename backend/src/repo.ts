@@ -68,9 +68,7 @@ export function createUser(db: DbHandle, input: CreateUser): User {
 
 /**
  * Create a default clinician on first run (idempotent). Called by the server at
- * startup so the seed happens through the SAME sql.js connection the server
- * uses — avoiding the separate-connection write race that a standalone seed
- * script would hit (sql.js keeps the whole DB in one process's memory).
+ * startup so the seed happens through the server's database connection.
  *
  * Credentials come from the environment; never rely on the dev fallback in prod.
  */

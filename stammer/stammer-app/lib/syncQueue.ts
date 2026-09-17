@@ -8,6 +8,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ingestMetrics, checkBackendHealth } from './backend';
+import { getIdentity } from './identity';
 import type { IngestMetrics } from '@fluentpath/shared';
 
 const QUEUE_KEY = 'fluentpath_metrics_queue';
@@ -40,6 +41,7 @@ async function saveQueue(items: QueuedItem[]): Promise<void> {
 /** Enqueue a payload for later sync. */
 export async function enqueueMetrics(payload: IngestMetrics): Promise<void> {
   const items = await loadQueue();
+  const identity = await getIdentity();
   const key = `${payload.deviceId}/${payload.metrics[0]?.id ?? 'batch'}`;
   if (items.some((item) => item.key === key)) return;
   items.push({ key, payload, enqueuedAt: Date.now(), attempts: 0 });
@@ -60,13 +62,17 @@ export async function flushQueue(): Promise<{
   }
 
   const items = await loadQueue();
+  const identity = await getIdentity();
   const errors: string[] = [];
   let posted = 0;
   const remaining: QueuedItem[] = [];
 
   for (const item of items) {
     try {
-      await ingestMetrics(item.payload);
+      const payload = item.payload.userId === identity.clientId
+        ? { ...item.payload, userId: identity.userId }
+        : item.payload;
+      await ingestMetrics(payload);
       posted++;
     } catch (e) {
       errors.push(e instanceof Error ? e.message : String(e));

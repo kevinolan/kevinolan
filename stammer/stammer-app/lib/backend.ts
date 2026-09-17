@@ -16,6 +16,25 @@ export interface IngestAck {
 
 export type { IngestMetrics } from '@fluentpath/shared';
 
+/** Register the anonymous mobile client and return its server-side user. */
+export async function registerClient(input: {
+  email: string;
+  displayName: string;
+}): Promise<{ id: string }> {
+  const res = await fetch(`${BACKEND_URL}/api/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, role: 'client' }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(
+      `registration_failed (${res.status}): ${detail?.error ?? detail?.detail ?? 'unknown'}`,
+    );
+  }
+  return (await res.json()) as { id: string };
+}
+
 /**
  * POST a batch of metrics. Throws on network/server failure; the caller
  * (syncQueue) is responsible for retrying.

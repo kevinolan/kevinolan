@@ -10,9 +10,8 @@
  *                       attempts inside LOGIN_WINDOW_SECONDS.
  *
  * State is scoped to the instance returned by `createRateLimiter`, so each app
- * (and each test) gets isolated counters. NOT shared across processes — fine
- * for the single-process sql.js backend (see README task n3); swap for Redis
- * if/when the backend scales out.
+ * (and each test) gets isolated counters. NOT shared across processes; use a
+ * shared store such as Redis when the backend scales out.
  */
 import type { Request } from 'express';
 import {
@@ -23,11 +22,8 @@ import {
   LOGIN_LOCKOUT_SECONDS,
 } from './config.js';
 
-/** Best-effort client IP: honour X-Forwarded-For, then Express, then socket. */
+/** Resolve the client IP using Express's explicitly configured proxy trust. */
 export function clientIp(req: Request): string {
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0].trim();
-  if (Array.isArray(xff) && xff.length > 0) return xff[0].trim();
   return req.ip ?? req.socket.remoteAddress ?? 'unknown';
 }
 

@@ -153,7 +153,15 @@ export async function analyzeRecording(
   const durationSec = input.durationSec ?? (pcm.length > 0 ? pcm.length / sr : 0);
   const report = input.transcript
     ? analyzeFluency(input.transcript, durationSec)
-    : { repetitions: 0, prolongations: 0, blocks: 0, wordCount: 0, ratePerMin: 0, disfluencies: 0 };
+    : {
+        repetitions: 0,
+        prolongations: 0,
+        blocks: 0,
+        wordCount: 0,
+        ratePerMin: 0,
+        disfluencies: 0,
+        summary: '',
+      };
 
   const metric: RecordingMetric = {
     id: `${clientId}-${Date.now()}`,
@@ -184,7 +192,7 @@ export function buildIngestPayload(
   identity: Awaited<ReturnType<typeof getIdentity>>,
 ): IngestMetrics {
   return {
-    userId: identity.clientId,
+    userId: identity.userId,
     deviceId: identity.deviceId,
     metrics: [result.metric],
   };

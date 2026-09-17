@@ -32,7 +32,7 @@ import {
   revokeRefreshToken,
 } from './repo.js';
 import { signToken, verifyToken, extractToken, issueRefreshToken, sha256 } from './auth.js';
-import { CORS_ORIGINS } from './config.js';
+import { CORS_ORIGINS, TRUST_PROXY } from './config.js';
 import { createRateLimiter, type RateLimiter } from './ratelimit.js';
 
 function notFound(db: DbHandle, res: Response, id: string) {
@@ -53,6 +53,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
 
 export function createApp(db: DbHandle): Express {
   const app = express();
+  app.set('trust proxy', TRUST_PROXY);
   app.use(cors({ origin: CORS_ORIGINS, credentials: true })); // restrict cross-origin to configured admin/client origins
   app.use(express.json({ limit: '1mb' }));
 
@@ -168,7 +169,7 @@ export function createApp(db: DbHandle): Express {
     }
     // The public endpoint never accepts a password (clients have no login yet).
     const { password: _ignore, ...clean } = parsed.data;
-    const user = createUser(db, clean);
+    const user = createUser(db, { ...clean, role: 'client' });
     db.persist(); // write-through: never lose a created user
     res.status(201).json(user);
   });

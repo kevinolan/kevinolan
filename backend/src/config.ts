@@ -36,6 +36,9 @@ export const LOGIN_LOCKOUT_SECONDS = Number(process.env.LOGIN_LOCKOUT_SECONDS ??
 export const AUTH_RATE_LIMIT = Number(process.env.AUTH_RATE_LIMIT ?? 20);
 export const AUTH_RATE_WINDOW_SECONDS = Number(process.env.AUTH_RATE_WINDOW_SECONDS ?? 60);
 
+/** Number of trusted reverse proxies in front of Express (0 when direct). */
+export const TRUST_PROXY = Number(process.env.TRUST_PROXY ?? 0);
+
 /** Minimum password length accepted at account creation. */
 export const PASSWORD_MIN_LENGTH = Number(process.env.PASSWORD_MIN_LENGTH ?? 8);
 

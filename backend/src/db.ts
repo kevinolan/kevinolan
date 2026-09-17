@@ -1,35 +1,18 @@
 /**
- * SQLite data layer backed by sql.js (pure-WASM SQLite — no native build needed).
+ * SQLite data layer backed by better-sqlite3.
  *
- * The same module is used by the running server (persists to `data/fluentpath.db`)
- * and by tests (in-memory, never persisted). Schema is created on open.
- *
- * Why sql.js over better-sqlite3: this environment (Windows / git-bash) has no
- * reliable node-gyp toolchain for native modules; sql.js is WASM-only and runs
- * identically on every platform. Swap to better-sqlite3 later with no API change
- * outside this file.
+ * Unlike the former WASM adapter, this keeps SQLite's file locking and WAL
+ * behavior intact. Each write is committed by SQLite; the legacy persist()
+ * hook remains a no-op so callers do not need to know which adapter is in use.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import Database from 'better-sqlite3';
 
-const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const DB_PATH = path.join(DATA_DIR, 'fluentpath.db');
-const WASM_DIR = path.dirname(require.resolve('sql.js/dist/sql-wasm.wasm'));
-// sql.js calls locateFile('sql-wasm.wasm') and expects the full path back.
-const locateFile = (file: string) => path.join(WASM_DIR, file);
-
-let sqlPromise: Promise<SqlJsStatic> | null = null;
-function getSql(): Promise<SqlJsStatic> {
-  if (!sqlPromise) {
-    sqlPromise = initSqlJs({ locateFile });
-  }
-  return sqlPromise as Promise<SqlJsStatic>;
-}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -37,7 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('client','clinician')),
-  password_hash TEXT,            -- null for clients created by the app (no login yet)
+  password_hash TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -47,7 +30,7 @@ CREATE TABLE IF NOT EXISTS metrics (
   device_id TEXT NOT NULL,
   recorded_at TEXT NOT NULL,
   duration_sec INTEGER NOT NULL,
-  p_stutter REAL,                 -- nullable
+  p_stutter REAL,
   repetitions INTEGER NOT NULL,
   prolongations INTEGER NOT NULL,
   blocks INTEGER NOT NULL,
@@ -60,68 +43,93 @@ CREATE INDEX IF NOT EXISTS idx_metrics_user ON metrics(user_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_recorded ON metrics(recorded_at);
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-  token_hash TEXT PRIMARY KEY,        -- SHA-256 of the opaque refresh token (plaintext never stored)
+  token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  expires_at TEXT NOT NULL,           -- ISO 8601
-  revoked INTEGER NOT NULL DEFAULT 0, -- 1 = revoked (logout / rotation)
+  expires_at TEXT NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_user ON refresh_tokens(user_id);
 `;
 
+export interface SqlResult {
+  values: unknown[][];
+}
+
+/** Small compatibility surface used by repo.ts and the existing tests. */
+export interface SqlDatabase {
+  exec(sql: string, params?: unknown[]): SqlResult[];
+  run(sql: string, params?: unknown[]): void;
+  close(): void;
+}
+
+class SqliteAdapter implements SqlDatabase {
+  constructor(private readonly database: Database.Database) {}
+
+  exec(sql: string, params: unknown[] = []): SqlResult[] {
+    if (!/^\s*(SELECT|PRAGMA|WITH)\b/i.test(sql)) {
+      this.database.exec(sql);
+      return [];
+    }
+    const rows = this.database.prepare(sql).all(...params) as Record<string, unknown>[];
+    return [{ values: rows.map((row) => Object.values(row)) }];
+  }
+
+  run(sql: string, params: unknown[] = []): void {
+    if (params.length === 0 && sql.includes(';')) {
+      this.database.exec(sql);
+      return;
+    }
+    this.database.prepare(sql).run(...params);
+  }
+
+  close(): void {
+    this.database.close();
+  }
+}
+
 export interface DbHandle {
-  db: Database;
-  /** Persist to disk (no-op for in-memory handles). */
+  db: SqlDatabase;
+  /** SQLite commits every mutating statement; retained for caller compatibility. */
   persist: () => void;
   /** Drop all rows (tests + db:reset). */
   clear: () => void;
   close: () => void;
 }
 
-/** Open a persisted DB (creates the file + schema if missing). */
-export async function openDb(dbPath: string = DB_PATH): Promise<DbHandle> {
-  const SQL = await getSql();
-  let db: Database;
-  if (fs.existsSync(dbPath)) {
-    db = new SQL.Database(fs.readFileSync(dbPath));
-  } else {
-    db = new SQL.Database();
+function configure(database: Database.Database): void {
+  database.pragma('journal_mode = WAL');
+  database.pragma('synchronous = FULL');
+  database.pragma('foreign_keys = ON');
+  database.pragma('busy_timeout = 5000');
+}
+
+function openDatabase(dbPath: string): DbHandle {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const database = new Database(dbPath);
+  configure(database);
+  database.exec(SCHEMA);
+
+  const columns = database.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+  if (!columns.some((column) => column.name.toLowerCase() === 'password_hash')) {
+    database.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
   }
-  db.run(SCHEMA);
-  // Migration: older DB files created before password_hash existed. On a fresh
-  // DB the column is already present (it's in SCHEMA), so only add if missing.
-  const hasCol = db.exec("PRAGMA table_info(users)").some((t) =>
-    (t.values ?? []).some((row) => String(row[1]).toLowerCase() === 'password_hash'),
-  );
-  if (!hasCol) db.run('ALTER TABLE users ADD COLUMN password_hash TEXT;');
 
-  const persist = () => {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    const bytes = db.export();
-    fs.writeFileSync(dbPath, Buffer.from(bytes));
-  };
-
+  const adapter = new SqliteAdapter(database);
   return {
-    db,
-    persist,
-    clear: () => {
-      db.run('DELETE FROM metrics; DELETE FROM users; DELETE FROM refresh_tokens;');
-    },
-    close: () => db.close(),
+    db: adapter,
+    persist: () => {},
+    clear: () => adapter.run('DELETE FROM metrics; DELETE FROM users; DELETE FROM refresh_tokens;'),
+    close: () => adapter.close(),
   };
 }
 
-/** Open an in-memory DB (tests). Nothing is written to disk. */
+/** Open the production database (creates the file + schema if missing). */
+export async function openDb(dbPath: string = DB_PATH): Promise<DbHandle> {
+  return openDatabase(dbPath);
+}
+
+/** Open an isolated in-memory database for tests. */
 export async function openMemoryDb(): Promise<DbHandle> {
-  const SQL = await getSql();
-  const db = new SQL.Database();
-  db.run(SCHEMA);
-  return {
-    db,
-    persist: () => {},
-    clear: () => {
-      db.run('DELETE FROM metrics; DELETE FROM users; DELETE FROM refresh_tokens;');
-    },
-    close: () => db.close(),
-  };
+  return openDatabase(':memory:');
 }

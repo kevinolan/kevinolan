@@ -5,11 +5,16 @@
  * for local development. Set this to your deployed backend URL in production.
  */
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-export const BACKEND_URL =
+const configuredBackendUrl =
   (Constants?.expoConfig?.extra?.BACKEND_URL as string | undefined) ??
-  process.env.BACKEND_URL ??
-  'http://localhost:4000';
+  process.env.EXPO_PUBLIC_BACKEND_URL ??
+  process.env.BACKEND_URL;
+
+/** Android emulators reach the host machine through 10.0.2.2, not localhost. */
+export const BACKEND_URL = (configuredBackendUrl ??
+  (Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000')).replace(/\/$/, '');
 
 // App metadata
 export const APP_NAME = 'SpeechPal';
