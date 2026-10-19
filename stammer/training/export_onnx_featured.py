@@ -11,8 +11,12 @@ Usage:
   .venv/Scripts/python.exe training/export_onnx_featured.py
 Produces: training/onnx/cnn_stutter_pcm.onnx   (input: pcm [1, T], output: logit [1])
 """
+import argparse
+import hashlib
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 import torch
@@ -24,12 +28,18 @@ from models import StutterCNN  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 CKPT = os.path.join(HERE, "checkpoints", "cnn_best.pt")
 OUT = os.path.join(HERE, "onnx", "cnn_stutter_pcm.onnx")
+OUT_META = os.path.join(HERE, "onnx", "cnn_stutter_pcm.metadata.json")
 
 N_MELS = 64
 N_FFT = 400
 HOP = 160
 TARGET_FRAMES = 128
 SR = 16000
+REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+PWA_MODEL_OUT = os.path.join(REPO_ROOT, "speech-therapy-app", "public", "models", "cnn_stutter_pcm.onnx")
+PWA_META_OUT = os.path.join(REPO_ROOT, "speech-therapy-app", "public", "models", "cnn_stutter_pcm.metadata.json")
+RN_MODEL_OUT = os.path.join(REPO_ROOT, "stammer", "stammer-app", "src", "assets", "models", "cnn_stutter_pcm.onnx")
+RN_META_OUT = os.path.join(REPO_ROOT, "stammer", "stammer-app", "src", "assets", "models", "cnn_stutter_pcm.metadata.json")
 
 
 def dft_kernel(n: int, n_freq: int):
@@ -99,7 +109,79 @@ class StutterModelFeatured(nn.Module):
         return out / denom
 
 
+def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            block = f.read(1 << 20)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()
+
+
+def build_metadata(model_path: str, model_version: str) -> dict:
+    return {
+        "modelName": "cnn_stutter_pcm",
+        "modelVersion": model_version,
+        "onnxFile": os.path.basename(model_path),
+        "sha256": sha256_file(model_path),
+        "sizeBytes": os.path.getsize(model_path),
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+        "input": {"name": "pcm", "dtype": "float32", "shape": ["batch", "time"], "sampleRateHz": SR},
+        "output": {"name": "logit", "dtype": "float32", "shape": ["batch"]},
+        "frontend": {
+            "nMels": N_MELS,
+            "nFft": N_FFT,
+            "hop": HOP,
+            "targetFrames": TARGET_FRAMES,
+        },
+        "checkpoint": os.path.relpath(CKPT, REPO_ROOT),
+    }
+
+
+def write_metadata(path: str, model_path: str, model_version: str) -> dict:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    meta = build_metadata(model_path, model_version)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+        f.write("\n")
+    return meta
+
+
+def copy_file(src: str, dst: str) -> None:
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(src, "rb") as rf, open(dst, "wb") as wf:
+        wf.write(rf.read())
+
+
+def distribute_outputs(model_path: str, metadata_path: str) -> None:
+    copy_file(model_path, PWA_MODEL_OUT)
+    copy_file(metadata_path, PWA_META_OUT)
+    copy_file(model_path, RN_MODEL_OUT)
+    copy_file(metadata_path, RN_META_OUT)
+    print("Distributed model+metadata to:")
+    print(f" - {PWA_MODEL_OUT}")
+    print(f" - {RN_MODEL_OUT}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Export CNN+frontend ONNX model and optional distribution.")
+    parser.add_argument(
+        "--model-version",
+        default=os.environ.get("FLUENTPATH_MODEL_VERSION", datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")),
+        help="Version identifier stored in metadata (default: FLUENTPATH_MODEL_VERSION or UTC timestamp).",
+    )
+    parser.add_argument(
+        "--distribute",
+        action="store_true",
+        help="Copy ONNX + metadata to both speech-therapy-app and stammer-app target paths.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     ckpt = torch.load(CKPT, map_location="cpu")
     cnn = StutterCNN()
@@ -114,6 +196,12 @@ def main() -> None:
         opset_version=17, dynamo=False, external_data=False,
     )
     print(f"Exported featured ONNX model to {OUT}")
+    meta = write_metadata(OUT_META, OUT, args.model_version)
+    print(f"Wrote metadata to {OUT_META}")
+    print(f"Model version={meta['modelVersion']} sha256={meta['sha256']}")
+
+    if args.distribute:
+        distribute_outputs(OUT, OUT_META)
 
     try:
         import onnxruntime as ort
